@@ -5,6 +5,8 @@ interface PublicHeaderProps {
   onHome: () => void
   onLogin: () => void
   onLogout: () => void
+  onTickets: () => void
+  publicOnly?: boolean
 }
 
 export function PublicHeader({
@@ -12,6 +14,8 @@ export function PublicHeader({
   onHome,
   onLogin,
   onLogout,
+  onTickets,
+  publicOnly = false,
 }: PublicHeaderProps) {
   return (
     <header className="topbar public-topbar">
@@ -30,20 +34,31 @@ export function PublicHeader({
         </span>
       </button>
 
-      <div className="account-actions">
-        {user ? (
-          <>
-            <span className="account-name">Olá, {user.name}</span>
-            <button type="button" className="text-button" onClick={onLogout}>
-              Sair
+      {publicOnly ? null : (
+        <div className="account-actions">
+          {user ? (
+            <>
+              {user.role === 'CUSTOMER' ? (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={onTickets}
+                >
+                  Meus ingressos
+                </button>
+              ) : null}
+              <span className="account-name">Olá, {user.name}</span>
+              <button type="button" className="text-button" onClick={onLogout}>
+                Sair
+              </button>
+            </>
+          ) : (
+            <button type="button" className="secondary-button" onClick={onLogin}>
+              Entrar
             </button>
-          </>
-        ) : (
-          <button type="button" className="secondary-button" onClick={onLogin}>
-            Entrar
-          </button>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </header>
   )
 }

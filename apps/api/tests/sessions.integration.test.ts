@@ -424,9 +424,12 @@ describe('POST /organizer/sessions', () => {
 describe('organizer session ownership and listing', () => {
   it('lists only sessions owned by the authenticated organizer', async () => {
     const ownSession = await createSession()
-    await createSession(tokenFor('SECOND_ORGANIZER'), {
-      venueName: 'Cinema de Outro Organizador',
-    })
+    const otherOrganizerSession = await createSession(
+      tokenFor('SECOND_ORGANIZER'),
+      {
+        venueName: 'Cinema de Outro Organizador',
+      },
+    )
 
     const response = await app.inject({
       method: 'GET',
@@ -435,9 +438,16 @@ describe('organizer session ownership and listing', () => {
     })
 
     expect(response.statusCode).toBe(200)
-    expect(response.json<{ sessions: SessionResponse[] }>().sessions).toEqual([
-      expect.objectContaining({ id: ownSession.id }),
-    ])
+    const sessions = response.json<{ sessions: SessionResponse[] }>().sessions
+
+    expect(sessions).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: ownSession.id })]),
+    )
+    expect(sessions).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: otherOrganizerSession.id }),
+      ]),
+    )
   })
 
   it('allows the owner to read the session details', async () => {

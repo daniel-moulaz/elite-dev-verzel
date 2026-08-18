@@ -72,8 +72,9 @@ O hold dura 10 minutos e usa o relógio do banco. Todas as operações que dispu
 
 1. bloquear linhas de `Seat` por `id` crescente;
 2. bloquear as `Reservation` relacionadas por `id` crescente;
-3. validar status e `expiresAt`;
-4. alterar reserva e vínculos dentro da mesma transação.
+3. bloquear e revalidar os `ReservationSeat` relacionados;
+4. validar status e `expiresAt` com o relógio do banco;
+5. alterar reserva e vínculos dentro da mesma transação.
 
 Na criação, a transação libera claims `PENDING` expirados, rejeita claims ainda ativos ou pagos e insere a nova reserva. `UNIQUE(ReservationSeat.seatId)` continua sendo a garantia final contra corrida.
 
@@ -85,9 +86,13 @@ O cliente envia somente o cenário reproduzível `APPROVED` ou `DECLINED`; a API
 
 Na aprovação, uma transação registra `Payment`, move a reserva para `PAID` e cria um `Ticket` por assento. Na recusa, registra `DECLINED`, move a reserva para `CANCELLED` e libera os assentos. Nenhum ingresso existe antes do commit aprovado.
 
+As FKs de `Payment` e `Ticket` usam `RESTRICT` sobre a reserva paga e sua alocação. Não existe fluxo de exclusão de reserva paga; a alocação continua sendo a fonte da indisponibilidade do assento.
+
 ### QR e consumo
 
 O QR contém um JWT/JWS HS256 com payload mínimo: versão, tipo, `jti` do ingresso, `sid` da sessão e claims de emissor, audiência e validade. `TICKET_SIGNING_SECRET` é forte, exclusivo e separado do segredo de login; o algoritmo aceito é fixado no verificador.
+
+O token não é persistido: o backend o gera a partir do ingresso e do snapshot da sessão a cada detalhe. A validade termina após a duração do filme — ou 180 minutos quando ausente — mais duas horas de margem.
 
 O código para entrada manual também é aleatório, único e possui entropia suficiente para não ser enumerável na interface autenticada da portaria.
 
@@ -132,7 +137,8 @@ Contas são fornecidas por seed no MVP; cadastro e recuperação de senha não s
 | `POST /reservations/:id/payment` | owner customer | aprovar ou recusar simulação |
 | `GET /me/tickets` | customer | listar ingressos próprios |
 | `GET /me/tickets/:id` | owner customer | abrir ingresso digital |
-| `POST /me/tickets/:id/share` | owner customer | criar ou substituir link compartilhável |
+| `POST /me/tickets/:id/share-link` | owner customer | criar ou substituir link compartilhável |
+| `DELETE /me/tickets/:id/share-link` | owner customer | revogar o link ativo |
 | `GET /shared/:token` | público | abrir ingresso compartilhado sem cache |
 | `GET /gate/sessions` | gate | escolher sessão publicada |
 | `POST /gate/sessions/:id/consume` | gate | validar e consumir QR/código |

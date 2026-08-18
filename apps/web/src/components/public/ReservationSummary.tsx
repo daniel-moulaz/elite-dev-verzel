@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import {
   ApiError,
   getReservation,
+  payReservation,
+  type PaymentStatus,
   type Reservation,
 } from '../../api'
 import {
@@ -16,6 +18,8 @@ interface ReservationSummaryProps {
   initialReservation: Reservation | undefined
   onBackToSession: (sessionId: string) => void
   onBackToCatalog: () => void
+  onOpenTicket: (ticketId: string) => void
+  onOpenTickets: () => void
 }
 
 function formatRemainingTime(remainingMilliseconds: number): string {
@@ -43,6 +47,8 @@ export function ReservationSummary({
   initialReservation,
   onBackToSession,
   onBackToCatalog,
+  onOpenTicket,
+  onOpenTickets,
 }: ReservationSummaryProps) {
   const [reservation, setReservation] = useState<Reservation | null>(
     initialReservation?.id === reservationId ? initialReservation : null,
@@ -55,6 +61,8 @@ export function ReservationSummary({
     reservationRemainingTime(initialReservation),
   )
   const [reloadKey, setReloadKey] = useState(0)
+  const [paymentAction, setPaymentAction] = useState<PaymentStatus | null>(null)
+  const [issuedTicketId, setIssuedTicketId] = useState<string | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -129,6 +137,45 @@ export function ReservationSummary({
     setReloadKey((value) => value + 1)
   }
 
+  async function simulatePayment(outcome: PaymentStatus) {
+    setPaymentAction(outcome)
+    setErrorMessage('')
+
+    try {
+      const result = await payReservation(accessToken, reservationId, outcome)
+      setReservation((current) =>
+        current
+          ? {
+              ...current,
+              status: result.reservation.status,
+              seats:
+                result.reservation.status === 'CANCELLED'
+                  ? []
+                  : current.seats,
+            }
+          : current,
+      )
+      setIssuedTicketId(result.tickets[0]?.id ?? null)
+    } catch (error) {
+      setErrorMessage(
+        error instanceof ApiError
+          ? error.message
+          : 'Não foi possível processar a simulação de pagamento.',
+      )
+
+      if (
+        error instanceof ApiError &&
+        (error.code === 'RESERVATION_EXPIRED' ||
+          error.code === 'PAYMENT_ALREADY_PROCESSED')
+      ) {
+        setStatus('loading')
+        setReloadKey((value) => value + 1)
+      }
+    } finally {
+      setPaymentAction(null)
+    }
+  }
+
   if (status === 'loading') {
     return (
       <div className="public-content">
@@ -163,6 +210,8 @@ export function ReservationSummary({
   const isPending = reservation.status === 'PENDING'
   const isLocallyExpired = isPending && remainingMilliseconds <= 0
   const isExpired = reservation.status === 'EXPIRED' || isLocallyExpired
+  const isPaid = reservation.status === 'PAID'
+  const isCancelled = reservation.status === 'CANCELLED'
   const posterUrl = tmdbPosterUrl(reservation.session.movie.posterPath)
 
   return (
@@ -171,7 +220,9 @@ export function ReservationSummary({
         <span aria-hidden="true">←</span> Voltar à programação
       </button>
 
-      <article className={`reservation-ticket ${isExpired ? 'reservation-expired' : ''}`}>
+      <article
+        className={`reservation-ticket ${isExpired || isCancelled ? 'reservation-expired' : ''} ${isPaid ? 'reservation-paid' : ''}`}
+      >
         <div className="reservation-ticket-main">
           {posterUrl ? (
             <img src={posterUrl} alt={`Pôster de ${reservation.session.movie.title}`} />
@@ -183,13 +234,23 @@ export function ReservationSummary({
 
           <div>
             <p className="section-kicker">
-              {isExpired ? 'Reserva expirada' : 'Lugares reservados'}
+              {isExpired
+                ? 'Reserva expirada'
+                : isPaid
+                  ? 'Pagamento aprovado'
+                  : isCancelled
+                    ? 'Pagamento recusado'
+                    : 'Lugares reservados'}
             </p>
             <h1>{reservation.session.movie.title}</h1>
             <p className="reservation-lead">
               {isExpired
                 ? 'O prazo terminou e os lugares foram liberados para a sala.'
-                : 'Seus lugares estão protegidos temporariamente. O servidor confirma o prazo abaixo.'}
+                : isPaid
+                  ? 'Pagamento simulado aprovado. Seus ingressos foram emitidos.'
+                  : isCancelled
+                    ? 'Pagamento simulado recusado. Nenhum ingresso foi emitido e os lugares foram liberados.'
+                    : 'Seus lugares estão protegidos temporariamente. O servidor confirma o prazo abaixo.'}
             </p>
 
             <dl className="reservation-facts">
@@ -220,12 +281,24 @@ export function ReservationSummary({
         </div>
 
         <aside className="reservation-timer">
-          <span>{isExpired ? 'Status' : 'Tempo restante'}</span>
-          <strong>{isExpired ? 'EXPIRADA' : formatRemainingTime(remainingMilliseconds)}</strong>
+          <span>{isPending && !isLocallyExpired ? 'Tempo restante' : 'Status'}</span>
+          <strong>
+            {isExpired
+              ? 'EXPIRADA'
+              : isPaid
+                ? 'APROVADO'
+                : isCancelled
+                  ? 'RECUSADO'
+                  : formatRemainingTime(remainingMilliseconds)}
+          </strong>
           <p>
             {isExpired
               ? 'Escolha os lugares novamente para criar uma nova reserva.'
-              : 'O pagamento será disponibilizado em uma próxima etapa.'}
+              : isPaid
+                ? 'O assento permanece reservado e o ingresso já está disponível.'
+                : isCancelled
+                  ? 'Você pode voltar à sessão e escolher lugares disponíveis.'
+                  : 'Escolha abaixo qual resultado de pagamento deseja demonstrar.'}
           </p>
         </aside>
       </article>
@@ -236,17 +309,56 @@ export function ReservationSummary({
         </p>
       ) : null}
 
-      {isExpired ? (
+      {isExpired || isCancelled ? (
         <button
           type="button"
           onClick={() => onBackToSession(reservation.session.id)}
         >
-          Escolher lugares novamente
+          {isCancelled ? 'Voltar à sessão' : 'Escolher lugares novamente'}
         </button>
+      ) : isPaid ? (
+        <div className="payment-result-actions">
+          {issuedTicketId ? (
+            <button type="button" onClick={() => onOpenTicket(issuedTicketId)}>
+              Ver meu ingresso
+            </button>
+          ) : null}
+          <button type="button" className="secondary-button" onClick={onOpenTickets}>
+            Meus ingressos
+          </button>
+        </div>
       ) : (
-        <p className="checkout-later-note">
-          Hold confirmado. O pagamento ainda não faz parte deste milestone.
-        </p>
+        <section className="payment-simulator" aria-labelledby="payment-heading">
+          <div>
+            <p className="section-kicker">Checkout demonstrativo</p>
+            <h2 id="payment-heading">Simular pagamento</h2>
+            <p>
+              Não há cobrança real nem dados de cartão. Selecione um resultado
+              para testar o fluxo ponta a ponta.
+            </p>
+          </div>
+          <div className="payment-buttons">
+            <button
+              type="button"
+              onClick={() => void simulatePayment('APPROVED')}
+              disabled={paymentAction !== null || isLocallyExpired}
+            >
+              {paymentAction === 'APPROVED'
+                ? 'Aprovando…'
+                : 'Simular pagamento aprovado'}
+            </button>
+            <button
+              type="button"
+              className="secondary-button decline-button"
+              onClick={() => void simulatePayment('DECLINED')}
+              disabled={paymentAction !== null || isLocallyExpired}
+            >
+              {paymentAction === 'DECLINED'
+                ? 'Recusando…'
+                : 'Simular pagamento recusado'}
+            </button>
+          </div>
+        </section>
       )}
     </div>
   )

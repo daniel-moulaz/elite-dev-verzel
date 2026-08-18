@@ -1,6 +1,6 @@
 # Elite Dev Verzel
 
-Base técnica do desafio Full Stack da Verzel. Até o M3, o projeto contém o monorepo React/Fastify, PostgreSQL com Prisma, autenticação JWT, gestão de sessões pelo organizador e o fluxo público de escolha e hold de assentos.
+Plataforma de sessões de cinema do desafio Full Stack da Verzel. Até o M4, o fluxo cobre publicação pelo organizador, escolha e hold de assentos, pagamento simulado, emissão de ingresso com QR assinado e compartilhamento seguro.
 
 ## Requisitos
 
@@ -23,7 +23,7 @@ npm run db:seed
 npm run db:check
 ```
 
-Em shells Unix, use `cp .env.example .env`. Troque `JWT_SECRET` por uma string aleatória com pelo menos 32 caracteres e configure `TMDB_READ_ACCESS_TOKEN` com o **API Read Access Token** obtido nas [configurações de API da TMDb](https://www.themoviedb.org/settings/api). O token pertence somente à API; não use prefixo `VITE_` nem o exponha no navegador. `WEB_ORIGIN` restringe o CORS e `VITE_API_URL` aponta o frontend para a API. Nunca reutilize os placeholders locais em produção. Se o PowerShell bloquear `npm.ps1`, use `npm.cmd`.
+Em shells Unix, use `cp .env.example .env`. Troque `JWT_SECRET` e `TICKET_SIGNING_SECRET` por strings aleatórias diferentes, cada uma com pelo menos 32 caracteres. Configure `TMDB_READ_ACCESS_TOKEN` com o **API Read Access Token** obtido nas [configurações de API da TMDb](https://www.themoviedb.org/settings/api). Esses valores pertencem somente à API; não use prefixo `VITE_` nem os exponha no navegador. `WEB_ORIGIN` restringe o CORS e `VITE_API_URL` aponta o frontend para a API. Nunca reutilize os placeholders locais em produção. Se o PowerShell bloquear `npm.ps1`, use `npm.cmd`.
 
 Para criar migrations futuras durante o desenvolvimento, use `npm run db:migrate:dev -- --name nome_da_migration`.
 
@@ -48,7 +48,7 @@ npm run dev:api
 
 ## Contas de demonstração
 
-O seed é idempotente e prepara somente estas contas no M1:
+O seed é idempotente e prepara estas contas:
 
 | Papel | E-mail | Senha |
 |---|---|---|
@@ -57,7 +57,7 @@ O seed é idempotente e prepara somente estas contas no M1:
 | Cliente | `customer2@demo.local` | `Demo@123` |
 | Portaria | `gate@demo.local` | `Demo@123` |
 
-As senhas são persistidas somente como hashes Argon2id. Para testar a API no PowerShell:
+As senhas são persistidas somente como hashes Argon2id. O seed também cria duas sessões futuras: uma livre para testar reservas e pagamentos, e outra com um ingresso `VALID` para `customer2@demo.local`. Os snapshots são locais e o seed não chama a TMDb. Para testar a API no PowerShell:
 
 ```powershell
 $body = @{ email = "organizer@demo.local"; password = "Demo@123" } | ConvertTo-Json
@@ -65,7 +65,16 @@ $login = Invoke-RestMethod -Method Post -Uri "http://localhost:3333/auth/login" 
 Invoke-RestMethod -Uri "http://localhost:3333/auth/me" -Headers @{ Authorization = "Bearer $($login.accessToken)" }
 ```
 
-O frontend armazena somente o access token em `sessionStorage` e confirma tokens existentes em `GET /auth/me`. Organizadores pesquisam filmes, preparam rascunhos e publicam sessões. A programação publicada é pública; clientes autenticados podem escolher até seis assentos e criar um hold de 10 minutos. A área da portaria permanece temporária.
+O frontend armazena somente o access token em `sessionStorage` e confirma tokens existentes em `GET /auth/me`. Organizadores pesquisam filmes, preparam rascunhos e publicam sessões. A programação publicada é pública; clientes autenticados escolhem até seis assentos, criam um hold de 10 minutos e simulam aprovação ou recusa sem informar cartão.
+
+## Fluxo de demonstração do M4
+
+1. Entre como `customer1@demo.local` e escolha uma sessão/assentos.
+2. No resumo da reserva, selecione **Simular pagamento aprovado** para emitir um ingresso ou **Simular pagamento recusado** para liberar os lugares.
+3. Abra **Meus ingressos** para visualizar o QR e o código manual.
+4. Em um ingresso, gere, copie, rotacione ou revogue `/shared/:token`; a página pública não mostra dados pessoais.
+
+O QR carrega um JWS HS256 com claims mínimos. O token é gerado sob demanda e confirmado no banco em uma etapa posterior da portaria. O link público usa token aleatório de 32 bytes; apenas seu SHA-256 é persistido.
 
 Para parar o PostgreSQL sem remover os dados:
 
@@ -97,8 +106,14 @@ npm run check
 - `GET /sessions/:id` — exibe o detalhe público de uma sessão;
 - `GET /sessions/:id/seats` — retorna disponibilidade derivada dos assentos;
 - `POST /reservations` — cria hold de até seis assentos para `CUSTOMER`;
-- `GET /reservations/:id` — consulta a reserva do próprio cliente e normaliza expiração lazy.
+- `GET /reservations/:id` — consulta a reserva do próprio cliente e normaliza expiração lazy;
+- `POST /reservations/:id/payment` — simula `APPROVED` ou `DECLINED` atomicamente;
+- `GET /me/tickets` — lista os ingressos do cliente autenticado;
+- `GET /me/tickets/:id` — retorna o ingresso próprio e o token QR assinado;
+- `POST /me/tickets/:id/share-link` — cria ou substitui o link compartilhável;
+- `DELETE /me/tickets/:id/share-link` — revoga o link ativo;
+- `GET /shared/:token` — mostra o ingresso sem PII e sem cache.
 
 As rotas de catálogo TMDb e `/organizer/*` exigem JWT de `ORGANIZER`; criar e consultar reserva exige `CUSTOMER`. O catálogo externo usa `pt-BR` e região `BR`; sessões já criadas usam o snapshot persistido e não dependem da TMDb para leitura.
 
-O PostgreSQL arbitra disputas de assento com locks ordenados e `UNIQUE(ReservationSeat.seatId)`. Holds vencidos são liberados quando consultados ou disputados, sem cron. O M3 ainda não inclui pagamento, ingresso, QR, compartilhamento ou cancelamento. Sessões publicadas permanecem estruturalmente imutáveis.
+O PostgreSQL arbitra disputas e pagamentos com locks ordenados e `UNIQUE(ReservationSeat.seatId)`. Aprovação preserva a alocação; recusa e expiração a removem na mesma transação. Sessões publicadas permanecem estruturalmente imutáveis. A portaria, o consumo do ingresso e a câmera ainda não fazem parte do M4.

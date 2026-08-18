@@ -9,8 +9,11 @@ import {
   type MovieCatalog,
 } from './modules/catalog/index.js'
 import { registerPublicSessions } from './modules/public-sessions/register-public-sessions.js'
+import { registerPayments } from './modules/payments/index.js'
 import { registerReservations } from './modules/reservations/index.js'
+import { registerSharedTickets } from './modules/shared-tickets/index.js'
 import { registerSessions } from './modules/sessions/register-sessions.js'
+import { registerTickets } from './modules/tickets/index.js'
 
 interface AppDependencies {
   movieCatalog?: MovieCatalog
@@ -33,7 +36,7 @@ export function buildApp(
   app.register(cors, {
     origin: env.WEB_ORIGIN,
     credentials: false,
-    methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   })
   registerAuth(app)
@@ -41,6 +44,12 @@ export function buildApp(
   registerSessions(app, movieCatalog)
   registerPublicSessions(app)
   registerReservations(app)
+  registerPayments(app)
+  registerTickets(app, { signingSecret: env.TICKET_SIGNING_SECRET })
+  registerSharedTickets(app, {
+    signingSecret: env.TICKET_SIGNING_SECRET,
+    webOrigin: env.WEB_ORIGIN,
+  })
 
   app.get('/health', async () => ({ status: 'ok' }))
 

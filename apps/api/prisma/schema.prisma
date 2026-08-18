@@ -27,6 +27,16 @@ enum ReservationStatus {
   CANCELLED
 }
 
+enum PaymentStatus {
+  APPROVED
+  DECLINED
+}
+
+enum TicketStatus {
+  VALID
+  USED
+}
+
 model User {
   id           String        @id @default(uuid()) @db.Uuid
   name         String        @db.VarChar(120)
@@ -37,6 +47,8 @@ model User {
   updatedAt    DateTime      @updatedAt @db.Timestamptz(3)
   sessions     Session[]
   reservations Reservation[] @relation("CustomerReservations")
+  tickets      Ticket[]      @relation("TicketOwner")
+  usedTickets  Ticket[]      @relation("TicketGate")
 }
 
 model Session {
@@ -61,6 +73,7 @@ model Session {
   organizer           User          @relation(fields: [organizerId], references: [id], onDelete: Restrict)
   seats               Seat[]
   reservations        Reservation[]
+  tickets             Ticket[]
 
   @@index([status, startsAt])
   @@index([organizerId, startsAt])
@@ -90,17 +103,59 @@ model Reservation {
   customer   User              @relation("CustomerReservations", fields: [customerId], references: [id], onDelete: Restrict)
   session    Session           @relation(fields: [sessionId], references: [id], onDelete: Restrict)
   seats      ReservationSeat[]
+  payment    Payment?
 
   @@index([customerId, createdAt])
   @@index([sessionId, status, expiresAt])
 }
 
 model ReservationSeat {
+  id             String      @default(uuid()) @unique @db.Uuid
   reservationId  String      @db.Uuid
   seatId         String      @unique @db.Uuid
   unitPriceCents Int
   reservation    Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
   seat           Seat        @relation(fields: [seatId], references: [id], onDelete: Restrict)
+  ticket         Ticket?
 
   @@id([reservationId, seatId])
+}
+
+model Payment {
+  id            String        @id @default(uuid()) @db.Uuid
+  reservationId String        @unique @db.Uuid
+  status        PaymentStatus
+  amountCents   Int
+  createdAt     DateTime      @default(now()) @db.Timestamptz(3)
+  reservation   Reservation   @relation(fields: [reservationId], references: [id], onDelete: Restrict)
+}
+
+model Ticket {
+  id                String            @id @default(uuid()) @db.Uuid
+  reservationSeatId String            @unique @db.Uuid
+  sessionId         String            @db.Uuid
+  ownerId           String            @db.Uuid
+  status            TicketStatus      @default(VALID)
+  manualCode        String            @unique @db.VarChar(19)
+  issuedAt          DateTime          @default(now()) @db.Timestamptz(3)
+  usedAt            DateTime?         @db.Timestamptz(3)
+  usedByGateId      String?           @db.Uuid
+  reservationSeat   ReservationSeat   @relation(fields: [reservationSeatId], references: [id], onDelete: Restrict)
+  session           Session           @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  owner             User              @relation("TicketOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  usedByGate        User?             @relation("TicketGate", fields: [usedByGateId], references: [id], onDelete: Restrict)
+  sharedLink        SharedTicketLink?
+
+  @@index([ownerId, issuedAt])
+  @@index([sessionId, status])
+}
+
+model SharedTicketLink {
+  id        String    @id @default(uuid()) @db.Uuid
+  ticketId  String    @unique @db.Uuid
+  tokenHash String    @unique @db.Char(64)
+  expiresAt DateTime  @db.Timestamptz(3)
+  revokedAt DateTime? @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+  ticket    Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 }

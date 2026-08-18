@@ -114,6 +114,81 @@ export interface Reservation {
   }>
 }
 
+export type PaymentStatus = 'APPROVED' | 'DECLINED'
+
+export interface PaymentResult {
+  payment: {
+    id: string
+    status: PaymentStatus
+    amountCents: number
+    createdAt: string
+  }
+  reservation: {
+    id: string
+    status: Extract<ReservationStatus, 'PAID' | 'CANCELLED'>
+  }
+  tickets: Array<{ id: string }>
+}
+
+export type TicketStatus = 'VALID' | 'USED'
+
+export interface TicketSummary {
+  id: string
+  status: TicketStatus
+  manualCode: string
+  issuedAt: string
+  seat: {
+    id: string
+    label: string
+  }
+  session: {
+    id: string
+    startsAt: string
+    venueName: string
+    roomName: string
+    movie: {
+      title: string
+      posterPath: string | null
+    }
+  }
+}
+
+export interface TicketDetail extends TicketSummary {
+  qrToken: string
+  session: TicketSummary['session'] & {
+    address: string
+  }
+  shareLink: {
+    expiresAt: string
+  } | null
+}
+
+export interface SharedTicket {
+  id: string
+  status: TicketStatus
+  manualCode: string
+  issuedAt: string
+  qrToken: string
+  seat: {
+    label: string
+  }
+  session: {
+    startsAt: string
+    venueName: string
+    roomName: string
+    address: string
+    movie: {
+      title: string
+      posterPath: string | null
+    }
+  }
+}
+
+export interface ShareLinkResult {
+  url: string
+  expiresAt: string
+}
+
 interface LoginResponse {
   accessToken: string
   user: AuthenticatedUser
@@ -134,6 +209,10 @@ interface PublicSessionsResponse {
 interface SeatsResponse {
   sessionId: string
   seats: SessionSeat[]
+}
+
+interface TicketsResponse {
+  tickets: TicketSummary[]
 }
 
 interface ErrorResponse {
@@ -398,5 +477,77 @@ export function getReservation(
     `/reservations/${reservationId}`,
     accessToken,
     { signal: signal ?? null },
+  )
+}
+
+export function payReservation(
+  accessToken: string,
+  reservationId: string,
+  outcome: PaymentStatus,
+): Promise<PaymentResult> {
+  return authenticatedRequest<PaymentResult>(
+    `/reservations/${reservationId}/payment`,
+    accessToken,
+    {
+      method: 'POST',
+      body: JSON.stringify({ outcome }),
+    },
+  )
+}
+
+export async function getMyTickets(
+  accessToken: string,
+  signal?: AbortSignal,
+): Promise<TicketSummary[]> {
+  const response = await authenticatedRequest<TicketsResponse>(
+    '/me/tickets',
+    accessToken,
+    { signal: signal ?? null },
+  )
+
+  return response.tickets
+}
+
+export function getMyTicket(
+  accessToken: string,
+  ticketId: string,
+  signal?: AbortSignal,
+): Promise<TicketDetail> {
+  return authenticatedRequest<TicketDetail>(
+    `/me/tickets/${ticketId}`,
+    accessToken,
+    { signal: signal ?? null },
+  )
+}
+
+export function createTicketShareLink(
+  accessToken: string,
+  ticketId: string,
+): Promise<ShareLinkResult> {
+  return authenticatedRequest<ShareLinkResult>(
+    `/me/tickets/${ticketId}/share-link`,
+    accessToken,
+    { method: 'POST' },
+  )
+}
+
+export async function revokeTicketShareLink(
+  accessToken: string,
+  ticketId: string,
+): Promise<void> {
+  await authenticatedRequest<unknown>(
+    `/me/tickets/${ticketId}/share-link`,
+    accessToken,
+    { method: 'DELETE' },
+  )
+}
+
+export function getSharedTicket(
+  token: string,
+  signal?: AbortSignal,
+): Promise<SharedTicket> {
+  return publicRequest<SharedTicket>(
+    `/shared/${encodeURIComponent(token)}`,
+    signal,
   )
 }

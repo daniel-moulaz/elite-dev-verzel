@@ -18,6 +18,9 @@ import { PublicHeader } from './components/public/PublicHeader'
 import { ReservationSummary } from './components/public/ReservationSummary'
 import { SessionDetail } from './components/public/SessionDetail'
 import { TmdbAttribution } from './components/public/TmdbAttribution'
+import { SharedTicket } from './components/tickets/SharedTicket'
+import { TicketDetail } from './components/tickets/TicketDetail'
+import { TicketList } from './components/tickets/TicketList'
 
 const accessTokenKey = 'elite-dev-access-token'
 
@@ -35,6 +38,9 @@ type PublicRoute =
   | { name: 'login' }
   | { name: 'session'; sessionId: string }
   | { name: 'reservation'; reservationId: string }
+  | { name: 'tickets' }
+  | { name: 'ticket'; ticketId: string }
+  | { name: 'shared'; token: string }
 
 function initialAuthState(): AuthState {
   return sessionStorage.getItem(accessTokenKey)
@@ -60,6 +66,22 @@ function parsePublicRoute(pathname = window.location.pathname): PublicRoute {
     }
   }
 
+  if (segments.length === 2 && segments[0] === 'shared') {
+    return { name: 'shared', token: segments[1]! }
+  }
+
+  if (segments.length === 2 && segments[0] === 'me' && segments[1] === 'tickets') {
+    return { name: 'tickets' }
+  }
+
+  if (
+    segments.length === 3 &&
+    segments[0] === 'me' &&
+    segments[1] === 'tickets'
+  ) {
+    return { name: 'ticket', ticketId: segments[2]! }
+  }
+
   return { name: 'catalog' }
 }
 
@@ -70,6 +92,18 @@ function routePath(route: PublicRoute): string {
 
   if (route.name === 'reservation') {
     return `/reservations/${encodeURIComponent(route.reservationId)}`
+  }
+
+  if (route.name === 'shared') {
+    return `/shared/${encodeURIComponent(route.token)}`
+  }
+
+  if (route.name === 'ticket') {
+    return `/me/tickets/${encodeURIComponent(route.ticketId)}`
+  }
+
+  if (route.name === 'tickets') {
+    return '/me/tickets'
   }
 
   return route.name === 'login' ? '/login' : '/'
@@ -321,6 +355,29 @@ export function App() {
     )
   }
 
+  if (route.name === 'shared') {
+    return (
+      <div className="public-shell">
+        <PublicHeader
+          user={undefined}
+          onHome={() => navigate('/')}
+          onLogin={() => requestLogin(routePath(route))}
+          onLogout={handleLogout}
+          onTickets={() => navigate('/me/tickets')}
+          publicOnly
+        />
+        <main>
+          <SharedTicket
+            key={route.token}
+            token={route.token}
+            onBack={() => navigate('/')}
+          />
+        </main>
+        <TmdbAttribution />
+      </div>
+    )
+  }
+
   if (authState.status === 'authenticated') {
     if (authState.user.role === 'ORGANIZER') {
       return (
@@ -361,6 +418,7 @@ export function App() {
         onHome={() => navigate('/')}
         onLogin={() => requestLogin(routePath(route))}
         onLogout={handleLogout}
+        onTickets={() => navigate('/me/tickets')}
       />
       <main>
         {route.name === 'session' ? (
@@ -385,6 +443,21 @@ export function App() {
             }
             onBackToCatalog={() => navigate('/')}
             onBackToSession={(sessionId) => navigate(`/sessions/${sessionId}`)}
+            onOpenTicket={(ticketId) => navigate(`/me/tickets/${ticketId}`)}
+            onOpenTickets={() => navigate('/me/tickets')}
+          />
+        ) : route.name === 'tickets' && customer && accessToken ? (
+          <TicketList
+            accessToken={accessToken}
+            onBack={() => navigate('/')}
+            onOpenTicket={(ticketId) => navigate(`/me/tickets/${ticketId}`)}
+          />
+        ) : route.name === 'ticket' && customer && accessToken ? (
+          <TicketDetail
+            key={route.ticketId}
+            accessToken={accessToken}
+            ticketId={route.ticketId}
+            onBack={() => navigate('/me/tickets')}
           />
         ) : route.name === 'reservation' ? (
           <div className="public-content">
@@ -392,6 +465,17 @@ export function App() {
               <p className="section-kicker">Reserva protegida</p>
               <h1>Entre para consultar esta reserva.</h1>
               <p>Somente o cliente que criou o hold pode visualizar seus dados.</p>
+              <button type="button" onClick={() => requestLogin(routePath(route))}>
+                Entrar como cliente
+              </button>
+            </div>
+          </div>
+        ) : route.name === 'tickets' || route.name === 'ticket' ? (
+          <div className="public-content">
+            <div className="content-state public-state">
+              <p className="section-kicker">Bilheteria pessoal</p>
+              <h1>Entre para acessar seus ingressos.</h1>
+              <p>Somente o titular pode consultar o QR e gerenciar compartilhamentos.</p>
               <button type="button" onClick={() => requestLogin(routePath(route))}>
                 Entrar como cliente
               </button>
