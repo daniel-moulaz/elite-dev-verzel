@@ -15,11 +15,15 @@
     "prisma:generate": "prisma generate",
     "db:check": "tsx src/scripts/check-database.ts",
     "db:migrate:dev": "prisma migrate dev",
-    "db:migrate:deploy": "prisma migrate deploy"
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:seed": "prisma db seed"
   },
   "dependencies": {
+    "@fastify/cors": "11.3.0",
+    "@fastify/jwt": "10.2.1",
     "@prisma/adapter-pg": "7.9.1",
     "@prisma/client": "7.9.1",
+    "argon2": "0.45.1",
     "dotenv": "17.4.2",
     "fastify": "5.12.0",
     "pg": "8.23.0",

@@ -1,7 +1,11 @@
 import { buildApp } from './app.js'
 import { env } from './config/env.js'
 
-const app = buildApp({ logger: true })
+const app = buildApp({
+  logger: {
+    redact: ['req.headers.authorization', 'req.body.password'],
+  },
+})
 
 try {
   await app.listen({ host: env.API_HOST, port: env.API_PORT })

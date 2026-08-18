@@ -22,8 +22,9 @@
     "db:up": "docker compose up -d db",
     "db:stop": "docker compose stop db",
     "db:check": "npm run db:check --workspace @elite-dev/api",
-    "db:migrate:dev": "npm run db:migrate:dev --workspace @elite-dev/api",
-    "db:migrate:deploy": "npm run db:migrate:deploy --workspace @elite-dev/api"
+    "db:migrate:dev": "npm run db:migrate:dev --workspace @elite-dev/api --",
+    "db:migrate:deploy": "npm run db:migrate:deploy --workspace @elite-dev/api",
+    "db:seed": "npm run db:seed --workspace @elite-dev/api"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

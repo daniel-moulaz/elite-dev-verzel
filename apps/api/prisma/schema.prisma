@@ -8,3 +8,19 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+enum Role {
+  ORGANIZER
+  CUSTOMER
+  GATE
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String   @db.VarChar(120)
+  email        String   @unique @db.VarChar(320)
+  passwordHash String   @db.VarChar(255)
+  role         Role
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(3)
+}

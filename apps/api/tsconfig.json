@@ -13,7 +13,9 @@
   },
   "include": [
     "prisma.config.ts",
+    "prisma/**/*.ts",
     "src/**/*.ts",
-    "tests/**/*.ts"
+    "tests/**/*.ts",
+    "vitest.config.ts"
   ]
 }
