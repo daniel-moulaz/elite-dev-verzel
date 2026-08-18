@@ -1,0 +1,35 @@
+{
+  "name": "@elite-dev/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prisma:validate": "prisma validate",
+    "prisma:generate": "prisma generate",
+    "db:check": "tsx src/scripts/check-database.ts",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "7.9.1",
+    "@prisma/client": "7.9.1",
+    "dotenv": "17.4.2",
+    "fastify": "5.12.0",
+    "pg": "8.23.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "@types/pg": "8.23.1",
+    "prisma": "7.9.1",
+    "tsx": "4.23.12",
+    "vitest": "4.1.11"
+  }
+}
