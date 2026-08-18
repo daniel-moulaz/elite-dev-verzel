@@ -1,13 +1,23 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type FormEvent,
+} from 'react'
 import {
   ApiError,
   getCurrentUser,
   login,
   setUnauthorizedHandler,
   type AuthenticatedUser,
-  type Role,
+  type Reservation,
 } from './api'
 import { OrganizerArea } from './components/organizer/OrganizerArea'
+import { PublicCatalog } from './components/public/PublicCatalog'
+import { PublicHeader } from './components/public/PublicHeader'
+import { ReservationSummary } from './components/public/ReservationSummary'
+import { SessionDetail } from './components/public/SessionDetail'
+import { TmdbAttribution } from './components/public/TmdbAttribution'
 
 const accessTokenKey = 'elite-dev-access-token'
 
@@ -20,26 +30,11 @@ type AuthState =
       accessToken: string
     }
 
-const roleContent: Record<
-  Role,
-  { eyebrow: string; title: string; description: string }
-> = {
-  ORGANIZER: {
-    eyebrow: 'Organizador',
-    title: 'Área temporária do organizador',
-    description: 'Seu acesso ORGANIZER foi confirmado pela API.',
-  },
-  CUSTOMER: {
-    eyebrow: 'Cliente',
-    title: 'Área temporária do cliente',
-    description: 'Seu acesso CUSTOMER foi confirmado pela API.',
-  },
-  GATE: {
-    eyebrow: 'Portaria',
-    title: 'Área temporária da portaria',
-    description: 'Seu acesso GATE foi confirmado pela API.',
-  },
-}
+type PublicRoute =
+  | { name: 'catalog' }
+  | { name: 'login' }
+  | { name: 'session'; sessionId: string }
+  | { name: 'reservation'; reservationId: string }
 
 function initialAuthState(): AuthState {
   return sessionStorage.getItem(accessTokenKey)
@@ -47,160 +42,74 @@ function initialAuthState(): AuthState {
     : { status: 'anonymous' }
 }
 
-export function App() {
-  const [authState, setAuthState] = useState<AuthState>(initialAuthState)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [loginError, setLoginError] = useState<string | null>(null)
+function parsePublicRoute(pathname = window.location.pathname): PublicRoute {
+  const segments = pathname.split('/').filter(Boolean)
 
-  const clearAuthentication = useCallback(() => {
-    sessionStorage.removeItem(accessTokenKey)
-    setLoginError(null)
-    setAuthState({ status: 'anonymous' })
-  }, [])
+  if (segments.length === 1 && segments[0] === 'login') {
+    return { name: 'login' }
+  }
 
-  useEffect(() => {
-    setUnauthorizedHandler(clearAuthentication)
+  if (segments.length === 2 && segments[0] === 'sessions') {
+    return { name: 'session', sessionId: segments[1]! }
+  }
 
-    return () => setUnauthorizedHandler(null)
-  }, [clearAuthentication])
-
-  useEffect(() => {
-    const accessToken = sessionStorage.getItem(accessTokenKey)
-
-    if (!accessToken) {
-      return
-    }
-
-    const controller = new AbortController()
-
-    getCurrentUser(accessToken, controller.signal)
-      .then((user) => {
-        setAuthState({ status: 'authenticated', user, accessToken })
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) {
-          return
-        }
-
-        if (error instanceof ApiError && error.status === 401) {
-          sessionStorage.removeItem(accessTokenKey)
-          setAuthState({ status: 'anonymous' })
-          return
-        }
-
-        setAuthState({
-          status: 'anonymous',
-          notice:
-            'Não foi possível restaurar sua sessão. Verifique a API e entre novamente.',
-        })
-      })
-
-    return () => controller.abort()
-  }, [])
-
-  async function handleLogin(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setIsSubmitting(true)
-    setLoginError(null)
-
-    const form = event.currentTarget
-    const formData = new FormData(form)
-    const email = String(formData.get('email') ?? '')
-    const password = String(formData.get('password') ?? '')
-
-    try {
-      const result = await login(email, password)
-      sessionStorage.setItem(accessTokenKey, result.accessToken)
-      form.reset()
-      setAuthState({
-        status: 'authenticated',
-        user: result.user,
-        accessToken: result.accessToken,
-      })
-    } catch (error) {
-      const message =
-        error instanceof ApiError
-          ? error.message
-          : 'Não foi possível conectar à API. Tente novamente.'
-      setLoginError(message)
-    } finally {
-      setIsSubmitting(false)
+  if (segments.length === 2 && segments[0] === 'reservations') {
+    return {
+      name: 'reservation',
+      reservationId: segments[1]!,
     }
   }
 
-  function handleLogout() {
-    clearAuthentication()
+  return { name: 'catalog' }
+}
+
+function routePath(route: PublicRoute): string {
+  if (route.name === 'session') {
+    return `/sessions/${encodeURIComponent(route.sessionId)}`
   }
 
-  if (authState.status === 'restoring') {
-    return (
-      <main className="app-shell" aria-busy="true">
-        <section className="auth-panel status-panel" aria-live="polite">
-          <p className="eyebrow">Elite Dev Verzel</p>
-          <h1>Validando sua sessão</h1>
-          <p>Aguarde enquanto confirmamos seu acesso.</p>
-        </section>
-      </main>
-    )
+  if (route.name === 'reservation') {
+    return `/reservations/${encodeURIComponent(route.reservationId)}`
   }
 
-  if (authState.status === 'authenticated') {
-    if (authState.user.role === 'ORGANIZER') {
-      return (
-        <OrganizerArea
-          accessToken={authState.accessToken}
-          user={authState.user}
-          onLogout={handleLogout}
-        />
-      )
-    }
+  return route.name === 'login' ? '/login' : '/'
+}
 
-    const content = roleContent[authState.user.role]
+interface LoginScreenProps {
+  notice: string | undefined
+  errorMessage: string | null
+  isSubmitting: boolean
+  onBack: () => void
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+}
 
-    return (
-      <main className="app-shell">
-        <section className="auth-panel role-panel">
-          <p className="eyebrow">{content.eyebrow}</p>
-          <h1>{content.title}</h1>
-          <p>{content.description}</p>
-
-          <dl className="identity-list">
-            <div>
-              <dt>Nome</dt>
-              <dd>{authState.user.name}</dd>
-            </div>
-            <div>
-              <dt>E-mail</dt>
-              <dd>{authState.user.email}</dd>
-            </div>
-            <div>
-              <dt>Papel</dt>
-              <dd>{authState.user.role}</dd>
-            </div>
-          </dl>
-
-          <button type="button" className="secondary-button" onClick={handleLogout}>
-            Sair
-          </button>
-        </section>
-      </main>
-    )
-  }
-
+function LoginScreen({
+  notice,
+  errorMessage,
+  isSubmitting,
+  onBack,
+  onSubmit,
+}: LoginScreenProps) {
   return (
-    <main className="app-shell">
+    <main className="app-shell login-shell">
       <section className="auth-panel">
-        <p className="eyebrow">Elite Dev Verzel</p>
+        <button type="button" className="back-button" onClick={onBack}>
+          <span aria-hidden="true">←</span> Voltar à programação
+        </button>
+        <p className="eyebrow">Elite Cinema</p>
         <h1>Entrar</h1>
-        <p className="intro">Use uma das contas de demonstração do projeto.</p>
+        <p className="intro">
+          Entre como cliente para reservar lugares ou use outra conta de
+          demonstração para acessar sua respectiva área.
+        </p>
 
-        {authState.notice ? (
+        {notice ? (
           <p className="message error-message" role="alert">
-            {authState.notice}
+            {notice}
           </p>
         ) : null}
 
-        <form onSubmit={handleLogin} aria-busy={isSubmitting}>
+        <form onSubmit={onSubmit} aria-busy={isSubmitting}>
           <div className="field">
             <label htmlFor="email">E-mail</label>
             <input
@@ -225,9 +134,9 @@ export function App() {
             />
           </div>
 
-          {loginError ? (
+          {errorMessage ? (
             <p className="message error-message" role="alert">
-              {loginError}
+              {errorMessage}
             </p>
           ) : null}
 
@@ -237,5 +146,264 @@ export function App() {
         </form>
       </section>
     </main>
+  )
+}
+
+interface GateAreaProps {
+  user: AuthenticatedUser
+  onLogout: () => void
+}
+
+function GateArea({ user, onLogout }: GateAreaProps) {
+  return (
+    <main className="app-shell">
+      <section className="auth-panel role-panel">
+        <p className="eyebrow">Portaria</p>
+        <h1>Área temporária da portaria</h1>
+        <p>Seu acesso GATE foi confirmado pela API.</p>
+        <dl className="identity-list">
+          <div>
+            <dt>Nome</dt>
+            <dd>{user.name}</dd>
+          </div>
+          <div>
+            <dt>E-mail</dt>
+            <dd>{user.email}</dd>
+          </div>
+          <div>
+            <dt>Papel</dt>
+            <dd>{user.role}</dd>
+          </div>
+        </dl>
+        <button type="button" className="secondary-button" onClick={onLogout}>
+          Sair
+        </button>
+      </section>
+    </main>
+  )
+}
+
+export function App() {
+  const [authState, setAuthState] = useState<AuthState>(initialAuthState)
+  const [route, setRoute] = useState<PublicRoute>(parsePublicRoute)
+  const [loginReturnPath, setLoginReturnPath] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [loginError, setLoginError] = useState<string | null>(null)
+  const [createdReservation, setCreatedReservation] =
+    useState<Reservation | null>(null)
+
+  const navigate = useCallback((path: string, replace = false) => {
+    if (replace) {
+      window.history.replaceState(null, '', path)
+    } else {
+      window.history.pushState(null, '', path)
+    }
+    setRoute(parsePublicRoute(path))
+    window.scrollTo({ top: 0, behavior: 'auto' })
+  }, [])
+
+  const clearAuthentication = useCallback(() => {
+    sessionStorage.removeItem(accessTokenKey)
+    setLoginError(null)
+    setAuthState({ status: 'anonymous' })
+  }, [])
+
+  useEffect(() => {
+    function handlePopState() {
+      setRoute(parsePublicRoute())
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+
+  useEffect(() => {
+    setUnauthorizedHandler(clearAuthentication)
+    return () => setUnauthorizedHandler(null)
+  }, [clearAuthentication])
+
+  useEffect(() => {
+    const accessToken = sessionStorage.getItem(accessTokenKey)
+
+    if (!accessToken) {
+      return
+    }
+
+    const controller = new AbortController()
+
+    getCurrentUser(accessToken, controller.signal)
+      .then((user) => {
+        setAuthState({ status: 'authenticated', user, accessToken })
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) {
+          return
+        }
+
+        if (error instanceof ApiError && error.status === 401) {
+          sessionStorage.removeItem(accessTokenKey)
+        }
+
+        setAuthState({
+          status: 'anonymous',
+          notice:
+            error instanceof ApiError && error.status === 401
+              ? 'Sua sessão expirou. Entre novamente para continuar.'
+              : 'Não foi possível restaurar sua sessão. Você ainda pode consultar a programação.',
+        })
+      })
+
+    return () => controller.abort()
+  }, [])
+
+  function requestLogin(returnPath: string) {
+    setLoginReturnPath(returnPath)
+    setLoginError(null)
+    navigate('/login')
+  }
+
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setIsSubmitting(true)
+    setLoginError(null)
+
+    const form = event.currentTarget
+    const formData = new FormData(form)
+    const email = String(formData.get('email') ?? '')
+    const password = String(formData.get('password') ?? '')
+
+    try {
+      const result = await login(email, password)
+      sessionStorage.setItem(accessTokenKey, result.accessToken)
+      form.reset()
+      setAuthState({
+        status: 'authenticated',
+        user: result.user,
+        accessToken: result.accessToken,
+      })
+
+      navigate(
+        result.user.role === 'CUSTOMER' ? (loginReturnPath ?? '/') : '/',
+        true,
+      )
+      setLoginReturnPath(null)
+    } catch (error) {
+      setLoginError(
+        error instanceof ApiError
+          ? error.message
+          : 'Não foi possível conectar à API. Tente novamente.',
+      )
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  function handleLogout() {
+    clearAuthentication()
+    setCreatedReservation(null)
+    navigate('/')
+  }
+
+  function handleReservationCreated(reservation: Reservation) {
+    setCreatedReservation(reservation)
+    navigate(`/reservations/${reservation.id}`)
+  }
+
+  if (authState.status === 'restoring') {
+    return (
+      <main className="app-shell" aria-busy="true">
+        <section className="auth-panel status-panel" aria-live="polite">
+          <p className="eyebrow">Elite Cinema</p>
+          <h1>Validando sua sessão</h1>
+          <p>Aguarde enquanto confirmamos seu acesso.</p>
+        </section>
+      </main>
+    )
+  }
+
+  if (authState.status === 'authenticated') {
+    if (authState.user.role === 'ORGANIZER') {
+      return (
+        <OrganizerArea
+          accessToken={authState.accessToken}
+          user={authState.user}
+          onLogout={handleLogout}
+        />
+      )
+    }
+
+    if (authState.user.role === 'GATE') {
+      return <GateArea user={authState.user} onLogout={handleLogout} />
+    }
+  }
+
+  if (route.name === 'login') {
+    return (
+      <LoginScreen
+        notice={authState.status === 'anonymous' ? authState.notice : undefined}
+        errorMessage={loginError}
+        isSubmitting={isSubmitting}
+        onBack={() => navigate(loginReturnPath ?? '/')}
+        onSubmit={(event) => void handleLogin(event)}
+      />
+    )
+  }
+
+  const customer =
+    authState.status === 'authenticated' ? authState.user : undefined
+  const accessToken =
+    authState.status === 'authenticated' ? authState.accessToken : undefined
+
+  return (
+    <div className="public-shell">
+      <PublicHeader
+        user={customer}
+        onHome={() => navigate('/')}
+        onLogin={() => requestLogin(routePath(route))}
+        onLogout={handleLogout}
+      />
+      <main>
+        {route.name === 'session' ? (
+          <SessionDetail
+            key={route.sessionId}
+            sessionId={route.sessionId}
+            user={customer}
+            accessToken={accessToken}
+            onBack={() => navigate('/')}
+            onRequireLogin={() => requestLogin(routePath(route))}
+            onReservationCreated={handleReservationCreated}
+          />
+        ) : route.name === 'reservation' && customer && accessToken ? (
+          <ReservationSummary
+            key={route.reservationId}
+            reservationId={route.reservationId}
+            accessToken={accessToken}
+            initialReservation={
+              createdReservation?.id === route.reservationId
+                ? createdReservation
+                : undefined
+            }
+            onBackToCatalog={() => navigate('/')}
+            onBackToSession={(sessionId) => navigate(`/sessions/${sessionId}`)}
+          />
+        ) : route.name === 'reservation' ? (
+          <div className="public-content">
+            <div className="content-state public-state">
+              <p className="section-kicker">Reserva protegida</p>
+              <h1>Entre para consultar esta reserva.</h1>
+              <p>Somente o cliente que criou o hold pode visualizar seus dados.</p>
+              <button type="button" onClick={() => requestLogin(routePath(route))}>
+                Entrar como cliente
+              </button>
+            </div>
+          </div>
+        ) : (
+          <PublicCatalog
+            onOpenSession={(sessionId) => navigate(`/sessions/${sessionId}`)}
+          />
+        )}
+      </main>
+      <TmdbAttribution />
+    </div>
   )
 }

@@ -1,6 +1,6 @@
 # Elite Dev Verzel
 
-Base técnica do desafio Full Stack da Verzel. Até o M2, o projeto contém o monorepo React/Fastify, PostgreSQL com Prisma, autenticação JWT para os três papéis e o fluxo do organizador para criar e publicar sessões de cinema a partir da TMDb.
+Base técnica do desafio Full Stack da Verzel. Até o M3, o projeto contém o monorepo React/Fastify, PostgreSQL com Prisma, autenticação JWT, gestão de sessões pelo organizador e o fluxo público de escolha e hold de assentos.
 
 ## Requisitos
 
@@ -65,7 +65,7 @@ $login = Invoke-RestMethod -Method Post -Uri "http://localhost:3333/auth/login" 
 Invoke-RestMethod -Uri "http://localhost:3333/auth/me" -Headers @{ Authorization = "Bearer $($login.accessToken)" }
 ```
 
-O frontend armazena somente o access token em `sessionStorage` e confirma tokens existentes em `GET /auth/me`. Ao entrar como organizador, é possível pesquisar filmes, salvar uma sessão como rascunho, editar filme/dados/layout e publicá-la. As áreas de cliente e portaria continuam temporárias neste milestone.
+O frontend armazena somente o access token em `sessionStorage` e confirma tokens existentes em `GET /auth/me`. Organizadores pesquisam filmes, preparam rascunhos e publicam sessões. A programação publicada é pública; clientes autenticados podem escolher até seis assentos e criar um hold de 10 minutos. A área da portaria permanece temporária.
 
 Para parar o PostgreSQL sem remover os dados:
 
@@ -84,7 +84,7 @@ npm run build
 npm run check
 ```
 
-## Endpoints do M2
+## Endpoints implementados
 
 - `GET /catalog/movies` — filmes em cartaz; aceita `?q=texto` para busca;
 - `GET /catalog/movies/:tmdbId` — detalhes do filme;
@@ -93,7 +93,12 @@ npm run check
 - `GET /organizer/sessions/:id` — abre sessão própria;
 - `PATCH /organizer/sessions/:id` — edita somente `DRAFT`;
 - `POST /organizer/sessions/:id/publish` — publica e torna a estrutura imutável.
+- `GET /sessions` — lista sessões públicas futuras; aceita `?q=texto`;
+- `GET /sessions/:id` — exibe o detalhe público de uma sessão;
+- `GET /sessions/:id/seats` — retorna disponibilidade derivada dos assentos;
+- `POST /reservations` — cria hold de até seis assentos para `CUSTOMER`;
+- `GET /reservations/:id` — consulta a reserva do próprio cliente e normaliza expiração lazy.
 
-Todos esses endpoints exigem JWT de `ORGANIZER`. O catálogo externo usa `pt-BR` e região `BR`; sessões já criadas usam o snapshot persistido e não dependem da TMDb para leitura.
+As rotas de catálogo TMDb e `/organizer/*` exigem JWT de `ORGANIZER`; criar e consultar reserva exige `CUSTOMER`. O catálogo externo usa `pt-BR` e região `BR`; sessões já criadas usam o snapshot persistido e não dependem da TMDb para leitura.
 
-O M2 ainda não inclui catálogo público, reservas, disponibilidade, pagamentos, ingressos ou cancelamento. Sessões publicadas não podem ser corrigidas estruturalmente no MVP; é necessário criar outro rascunho.
+O PostgreSQL arbitra disputas de assento com locks ordenados e `UNIQUE(ReservationSeat.seatId)`. Holds vencidos são liberados quando consultados ou disputados, sem cron. O M3 ainda não inclui pagamento, ingresso, QR, compartilhamento ou cancelamento. Sessões publicadas permanecem estruturalmente imutáveis.

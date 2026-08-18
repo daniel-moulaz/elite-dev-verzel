@@ -26,6 +26,12 @@ export function tmdbPosterUrl(path: string | null): string | null {
     : null
 }
 
+export function tmdbBackdropUrl(path: string | null): string | null {
+  return path?.startsWith('/')
+    ? `https://image.tmdb.org/t/p/w1280${path}`
+    : null
+}
+
 export function toDateTimeLocalValue(value: string): string {
   const date = new Date(value)
   const localTime = date.getTime() - date.getTimezoneOffset() * 60_000

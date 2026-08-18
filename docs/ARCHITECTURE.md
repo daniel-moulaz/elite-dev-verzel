@@ -127,7 +127,8 @@ Contas são fornecidas por seed no MVP; cadastro e recuperação de senha não s
 | `GET /sessions` | público | listar e buscar sessões publicadas |
 | `GET /sessions/:id` | público | obter detalhes |
 | `GET /sessions/:id/seats` | público | obter disponibilidade atual |
-| `POST /sessions/:id/reservations` | customer | criar hold |
+| `POST /reservations` | customer | criar hold para sessão e assentos informados |
+| `GET /reservations/:id` | owner customer | consultar hold e normalizar expiração lazy |
 | `POST /reservations/:id/payment` | owner customer | aprovar ou recusar simulação |
 | `GET /me/tickets` | customer | listar ingressos próprios |
 | `GET /me/tickets/:id` | owner customer | abrir ingresso digital |

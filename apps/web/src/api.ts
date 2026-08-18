@@ -57,6 +57,63 @@ export interface SessionInput {
 
 export type SessionUpdateInput = Partial<SessionInput>
 
+export interface PublicSessionSummary {
+  id: string
+  startsAt: string
+  venueName: string
+  roomName: string
+  priceCents: number
+  capacity: number
+  movie: {
+    title: string
+    posterPath: string | null
+    releaseDate: string | null
+  }
+}
+
+export interface PublicSessionDetail extends PublicSessionSummary {
+  address: string
+  movie: SessionMovie
+}
+
+export type SeatStatus = 'AVAILABLE' | 'HELD' | 'SOLD'
+
+export interface SessionSeat {
+  id: string
+  label: string
+  rowLabel: string
+  number: number
+  status: SeatStatus
+}
+
+export type ReservationStatus =
+  | 'PENDING'
+  | 'PAID'
+  | 'EXPIRED'
+  | 'CANCELLED'
+
+export interface Reservation {
+  id: string
+  status: ReservationStatus
+  expiresAt: string
+  totalCents: number
+  session: {
+    id: string
+    startsAt: string
+    venueName: string
+    roomName: string
+    movie: {
+      title: string
+      posterPath: string | null
+    }
+  }
+  seats: Array<{
+    id: string
+    label: string
+    unitPriceCents: number
+  }>
+}
+
 interface LoginResponse {
   accessToken: string
   user: AuthenticatedUser
@@ -70,8 +127,18 @@ interface SessionsResponse {
   sessions: OrganizerSession[]
 }
 
+interface PublicSessionsResponse {
+  sessions: PublicSessionSummary[]
+}
+
+interface SeatsResponse {
+  sessionId: string
+  seats: SessionSeat[]
+}
+
 interface ErrorResponse {
   message?: unknown
+  error?: unknown
 }
 
 const apiUrl = (import.meta.env.VITE_API_URL || 'http://localhost:3333').replace(
@@ -87,11 +154,13 @@ export function setUnauthorizedHandler(handler: (() => void) | null) {
 
 export class ApiError extends Error {
   readonly status: number
+  readonly code: string | undefined
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code?: string) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.code = code
   }
 }
 
@@ -104,11 +173,24 @@ async function readResponse<T>(response: Response): Promise<T> {
       typeof errorBody?.message === 'string'
         ? errorBody.message
         : 'Não foi possível concluir a solicitação.'
+    const code =
+      typeof errorBody?.error === 'string' ? errorBody.error : undefined
 
-    throw new ApiError(message, response.status)
+    throw new ApiError(message, response.status, code)
   }
 
   return body as T
+}
+
+async function publicRequest<T>(
+  path: string,
+  signal?: AbortSignal,
+): Promise<T> {
+  const response = await fetch(`${apiUrl}${path}`, {
+    signal: signal ?? null,
+  })
+
+  return readResponse<T>(response)
 }
 
 async function authenticatedRequest<T>(
@@ -254,5 +336,67 @@ export function publishOrganizerSession(
     `/organizer/sessions/${sessionId}/publish`,
     accessToken,
     { method: 'POST' },
+  )
+}
+
+export async function getPublicSessions(
+  query = '',
+  signal?: AbortSignal,
+): Promise<PublicSessionSummary[]> {
+  const params = new URLSearchParams()
+  const normalizedQuery = query.trim()
+
+  if (normalizedQuery) {
+    params.set('q', normalizedQuery)
+  }
+
+  const suffix = params.size > 0 ? `?${params.toString()}` : ''
+  const response = await publicRequest<PublicSessionsResponse>(
+    `/sessions${suffix}`,
+    signal,
+  )
+
+  return response.sessions
+}
+
+export function getPublicSession(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<PublicSessionDetail> {
+  return publicRequest<PublicSessionDetail>(`/sessions/${sessionId}`, signal)
+}
+
+export async function getSessionSeats(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<SessionSeat[]> {
+  const response = await publicRequest<SeatsResponse>(
+    `/sessions/${sessionId}/seats`,
+    signal,
+  )
+
+  return response.seats
+}
+
+export function createReservation(
+  accessToken: string,
+  sessionId: string,
+  seatIds: string[],
+): Promise<Reservation> {
+  return authenticatedRequest<Reservation>('/reservations', accessToken, {
+    method: 'POST',
+    body: JSON.stringify({ sessionId, seatIds }),
+  })
+}
+
+export function getReservation(
+  accessToken: string,
+  reservationId: string,
+  signal?: AbortSignal,
+): Promise<Reservation> {
+  return authenticatedRequest<Reservation>(
+    `/reservations/${reservationId}`,
+    accessToken,
+    { signal: signal ?? null },
   )
 }

@@ -20,15 +20,23 @@ enum SessionStatus {
   PUBLISHED
 }
 
+enum ReservationStatus {
+  PENDING
+  PAID
+  EXPIRED
+  CANCELLED
+}
+
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  name         String   @db.VarChar(120)
-  email        String   @unique @db.VarChar(320)
-  passwordHash String   @db.VarChar(255)
+  id           String        @id @default(uuid()) @db.Uuid
+  name         String        @db.VarChar(120)
+  email        String        @unique @db.VarChar(320)
+  passwordHash String        @db.VarChar(255)
   role         Role
-  createdAt    DateTime @default(now()) @db.Timestamptz(3)
-  updatedAt    DateTime @updatedAt @db.Timestamptz(3)
+  createdAt    DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime      @updatedAt @db.Timestamptz(3)
   sessions     Session[]
+  reservations Reservation[] @relation("CustomerReservations")
 }
 
 model Session {
@@ -52,18 +60,47 @@ model Session {
   updatedAt           DateTime      @updatedAt @db.Timestamptz(3)
   organizer           User          @relation(fields: [organizerId], references: [id], onDelete: Restrict)
   seats               Seat[]
+  reservations        Reservation[]
 
   @@index([status, startsAt])
   @@index([organizerId, startsAt])
 }
 
 model Seat {
-  id        String  @id @default(uuid()) @db.Uuid
-  sessionId String  @db.Uuid
-  rowLabel  String  @db.VarChar(1)
-  number    Int     @db.SmallInt
-  label     String  @db.VarChar(3)
-  session   Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id              String           @id @default(uuid()) @db.Uuid
+  sessionId       String           @db.Uuid
+  rowLabel        String           @db.VarChar(1)
+  number          Int              @db.SmallInt
+  label           String           @db.VarChar(3)
+  session         Session          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  reservationSeat ReservationSeat?
 
   @@unique([sessionId, label])
+}
+
+model Reservation {
+  id         String            @id @default(uuid()) @db.Uuid
+  customerId String            @db.Uuid
+  sessionId  String            @db.Uuid
+  status     ReservationStatus @default(PENDING)
+  expiresAt  DateTime          @db.Timestamptz(3)
+  totalCents Int
+  createdAt  DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime          @updatedAt @db.Timestamptz(3)
+  customer   User              @relation("CustomerReservations", fields: [customerId], references: [id], onDelete: Restrict)
+  session    Session           @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  seats      ReservationSeat[]
+
+  @@index([customerId, createdAt])
+  @@index([sessionId, status, expiresAt])
+}
+
+model ReservationSeat {
+  reservationId  String      @db.Uuid
+  seatId         String      @unique @db.Uuid
+  unitPriceCents Int
+  reservation    Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  seat           Seat        @relation(fields: [seatId], references: [id], onDelete: Restrict)
+
+  @@id([reservationId, seatId])
 }

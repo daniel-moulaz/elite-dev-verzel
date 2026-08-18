@@ -8,6 +8,8 @@ import {
   createTmdbCatalog,
   type MovieCatalog,
 } from './modules/catalog/index.js'
+import { registerPublicSessions } from './modules/public-sessions/register-public-sessions.js'
+import { registerReservations } from './modules/reservations/index.js'
 import { registerSessions } from './modules/sessions/register-sessions.js'
 
 interface AppDependencies {
@@ -37,6 +39,8 @@ export function buildApp(
   registerAuth(app)
   app.register(catalogRoutes, { prefix: '/catalog', catalog: movieCatalog })
   registerSessions(app, movieCatalog)
+  registerPublicSessions(app)
+  registerReservations(app)
 
   app.get('/health', async () => ({ status: 'ok' }))
 
