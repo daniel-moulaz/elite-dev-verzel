@@ -1,18 +1,24 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import {
   ApiError,
   getCurrentUser,
   login,
+  setUnauthorizedHandler,
   type AuthenticatedUser,
   type Role,
 } from './api'
+import { OrganizerArea } from './components/organizer/OrganizerArea'
 
 const accessTokenKey = 'elite-dev-access-token'
 
 type AuthState =
   | { status: 'restoring' }
   | { status: 'anonymous'; notice?: string }
-  | { status: 'authenticated'; user: AuthenticatedUser }
+  | {
+      status: 'authenticated'
+      user: AuthenticatedUser
+      accessToken: string
+    }
 
 const roleContent: Record<
   Role,
@@ -46,6 +52,18 @@ export function App() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [loginError, setLoginError] = useState<string | null>(null)
 
+  const clearAuthentication = useCallback(() => {
+    sessionStorage.removeItem(accessTokenKey)
+    setLoginError(null)
+    setAuthState({ status: 'anonymous' })
+  }, [])
+
+  useEffect(() => {
+    setUnauthorizedHandler(clearAuthentication)
+
+    return () => setUnauthorizedHandler(null)
+  }, [clearAuthentication])
+
   useEffect(() => {
     const accessToken = sessionStorage.getItem(accessTokenKey)
 
@@ -57,7 +75,7 @@ export function App() {
 
     getCurrentUser(accessToken, controller.signal)
       .then((user) => {
-        setAuthState({ status: 'authenticated', user })
+        setAuthState({ status: 'authenticated', user, accessToken })
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) {
@@ -94,7 +112,11 @@ export function App() {
       const result = await login(email, password)
       sessionStorage.setItem(accessTokenKey, result.accessToken)
       form.reset()
-      setAuthState({ status: 'authenticated', user: result.user })
+      setAuthState({
+        status: 'authenticated',
+        user: result.user,
+        accessToken: result.accessToken,
+      })
     } catch (error) {
       const message =
         error instanceof ApiError
@@ -107,9 +129,7 @@ export function App() {
   }
 
   function handleLogout() {
-    sessionStorage.removeItem(accessTokenKey)
-    setLoginError(null)
-    setAuthState({ status: 'anonymous' })
+    clearAuthentication()
   }
 
   if (authState.status === 'restoring') {
@@ -125,6 +145,16 @@ export function App() {
   }
 
   if (authState.status === 'authenticated') {
+    if (authState.user.role === 'ORGANIZER') {
+      return (
+        <OrganizerArea
+          accessToken={authState.accessToken}
+          user={authState.user}
+          onLogout={handleLogout}
+        />
+      )
+    }
+
     const content = roleContent[authState.user.role]
 
     return (

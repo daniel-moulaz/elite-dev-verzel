@@ -16,6 +16,7 @@ const envSchema = z.object({
   DATABASE_URL: z.url(),
   WEB_ORIGIN: z.url().default('http://localhost:5173'),
   JWT_SECRET: z.string().min(32),
+  TMDB_READ_ACCESS_TOKEN: z.string().trim().min(1).optional(),
 })
 
 const parsedEnv = envSchema.safeParse(process.env)

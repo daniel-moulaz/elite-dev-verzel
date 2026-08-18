@@ -15,6 +15,11 @@ enum Role {
   GATE
 }
 
+enum SessionStatus {
+  DRAFT
+  PUBLISHED
+}
+
 model User {
   id           String   @id @default(uuid()) @db.Uuid
   name         String   @db.VarChar(120)
@@ -23,4 +28,42 @@ model User {
   role         Role
   createdAt    DateTime @default(now()) @db.Timestamptz(3)
   updatedAt    DateTime @updatedAt @db.Timestamptz(3)
+  sessions     Session[]
+}
+
+model Session {
+  id                  String        @id @default(uuid()) @db.Uuid
+  organizerId         String        @db.Uuid
+  status              SessionStatus @default(DRAFT)
+  startsAt            DateTime      @db.Timestamptz(3)
+  venueName           String        @db.VarChar(120)
+  roomName            String        @db.VarChar(80)
+  address             String        @db.VarChar(240)
+  priceCents          Int
+  tmdbMovieId         Int
+  movieTitle          String        @db.VarChar(240)
+  movieOverview       String        @db.Text
+  moviePosterPath     String?       @db.VarChar(255)
+  movieBackdropPath   String?       @db.VarChar(255)
+  movieReleaseDate    DateTime?     @db.Date
+  movieRuntimeMinutes Int?
+  publishedAt         DateTime?     @db.Timestamptz(3)
+  createdAt           DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime      @updatedAt @db.Timestamptz(3)
+  organizer           User          @relation(fields: [organizerId], references: [id], onDelete: Restrict)
+  seats               Seat[]
+
+  @@index([status, startsAt])
+  @@index([organizerId, startsAt])
+}
+
+model Seat {
+  id        String  @id @default(uuid()) @db.Uuid
+  sessionId String  @db.Uuid
+  rowLabel  String  @db.VarChar(1)
+  number    Int     @db.SmallInt
+  label     String  @db.VarChar(3)
+  session   Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, label])
 }

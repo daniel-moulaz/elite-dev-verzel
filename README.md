@@ -1,6 +1,6 @@
 # Elite Dev Verzel
 
-Base técnica do desafio Full Stack da Verzel. Até o M1, o projeto contém o monorepo React/Fastify, PostgreSQL com Prisma e autenticação JWT para os papéis `ORGANIZER`, `CUSTOMER` e `GATE`.
+Base técnica do desafio Full Stack da Verzel. Até o M2, o projeto contém o monorepo React/Fastify, PostgreSQL com Prisma, autenticação JWT para os três papéis e o fluxo do organizador para criar e publicar sessões de cinema a partir da TMDb.
 
 ## Requisitos
 
@@ -23,7 +23,7 @@ npm run db:seed
 npm run db:check
 ```
 
-Em shells Unix, use `cp .env.example .env`. Troque `JWT_SECRET` por uma string aleatória com pelo menos 32 caracteres; nunca reutilize os valores locais em produção. `WEB_ORIGIN` restringe o CORS e `VITE_API_URL` aponta o frontend para a API. Se o PowerShell bloquear `npm.ps1`, use `npm.cmd`.
+Em shells Unix, use `cp .env.example .env`. Troque `JWT_SECRET` por uma string aleatória com pelo menos 32 caracteres e configure `TMDB_READ_ACCESS_TOKEN` com o **API Read Access Token** obtido nas [configurações de API da TMDb](https://www.themoviedb.org/settings/api). O token pertence somente à API; não use prefixo `VITE_` nem o exponha no navegador. `WEB_ORIGIN` restringe o CORS e `VITE_API_URL` aponta o frontend para a API. Nunca reutilize os placeholders locais em produção. Se o PowerShell bloquear `npm.ps1`, use `npm.cmd`.
 
 Para criar migrations futuras durante o desenvolvimento, use `npm run db:migrate:dev -- --name nome_da_migration`.
 
@@ -65,7 +65,7 @@ $login = Invoke-RestMethod -Method Post -Uri "http://localhost:3333/auth/login" 
 Invoke-RestMethod -Uri "http://localhost:3333/auth/me" -Headers @{ Authorization = "Bearer $($login.accessToken)" }
 ```
 
-O frontend armazena somente o access token em `sessionStorage`, confirma tokens existentes em `GET /auth/me` e exibe uma área temporária correspondente ao papel autenticado.
+O frontend armazena somente o access token em `sessionStorage` e confirma tokens existentes em `GET /auth/me`. Ao entrar como organizador, é possível pesquisar filmes, salvar uma sessão como rascunho, editar filme/dados/layout e publicá-la. As áreas de cliente e portaria continuam temporárias neste milestone.
 
 Para parar o PostgreSQL sem remover os dados:
 
@@ -80,6 +80,20 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
+# ou execute todas as verificações acima:
+npm run check
 ```
 
-Os endpoints atuais são `GET /health`, `POST /auth/login` e `GET /auth/me`. O M1 não inclui cadastro, refresh token, recuperação de senha ou logout no servidor. Ownership será aplicado nos services quando sessões, reservas e ingressos forem introduzidos; nenhuma dessas entidades faz parte deste milestone.
+## Endpoints do M2
+
+- `GET /catalog/movies` — filmes em cartaz; aceita `?q=texto` para busca;
+- `GET /catalog/movies/:tmdbId` — detalhes do filme;
+- `GET /organizer/sessions` — lista somente as sessões do organizador autenticado;
+- `POST /organizer/sessions` — cria rascunho com snapshot TMDb e assentos;
+- `GET /organizer/sessions/:id` — abre sessão própria;
+- `PATCH /organizer/sessions/:id` — edita somente `DRAFT`;
+- `POST /organizer/sessions/:id/publish` — publica e torna a estrutura imutável.
+
+Todos esses endpoints exigem JWT de `ORGANIZER`. O catálogo externo usa `pt-BR` e região `BR`; sessões já criadas usam o snapshot persistido e não dependem da TMDb para leitura.
+
+O M2 ainda não inclui catálogo público, reservas, disponibilidade, pagamentos, ingressos ou cancelamento. Sessões publicadas não podem ser corrigidas estruturalmente no MVP; é necessário criar outro rascunho.

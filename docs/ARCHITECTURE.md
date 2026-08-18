@@ -118,7 +118,8 @@ Contas são fornecidas por seed no MVP; cadastro e recuperação de senha não s
 | Método e rota | Acesso | Finalidade |
 |---|---|---|
 | `POST /auth/login` | público | autenticar conta de demonstração |
-| `GET /movies/search` | organizer | pesquisar TMDb pelo backend |
+| `GET /catalog/movies` | organizer | listar filmes em cartaz ou pesquisar TMDb com `?q=` |
+| `GET /catalog/movies/:tmdbId` | organizer | obter detalhes do filme pelo backend |
 | `GET /organizer/sessions` | organizer | listar sessões próprias |
 | `POST /organizer/sessions` | organizer | criar rascunho e assentos |
 | `GET/PATCH /organizer/sessions/:id` | owner | consultar ou editar rascunho |

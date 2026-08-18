@@ -106,7 +106,9 @@ function tamperSignature(accessToken: string) {
 
 describe('seed de autenticação', () => {
   it('contains exactly the four demo users with the expected roles and hashes', async () => {
+    const demoEmails = DEMO_USERS.map(({ email }) => email)
     const users = await prisma.user.findMany({
+      where: { email: { in: demoEmails } },
       orderBy: { email: 'asc' },
     })
 
@@ -130,6 +132,21 @@ describe('seed de autenticação', () => {
 })
 
 describe('POST /auth/login', () => {
+  it('preserves client errors raised by Fastify without exposing internals', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: 'email=organizer%40demo.local',
+    })
+
+    expect(response.statusCode).toBe(415)
+    expect(response.json()).toEqual({
+      error: 'VALIDATION_ERROR',
+      message: 'A requisição contém dados inválidos.',
+    })
+  })
+
   it('authenticates every demo role without exposing passwordHash', () => {
     for (const demoUser of DEMO_USERS) {
       const login = getLogin(demoUser.email)
