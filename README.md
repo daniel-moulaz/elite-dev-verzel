@@ -37,6 +37,7 @@ Esse comando inicia:
 
 - frontend: `http://localhost:5173`;
 - backend: `http://localhost:3333`;
+- API documentation: `http://localhost:3333/docs`;
 - health check: `http://localhost:3333/health`.
 
 Também é possível iniciar separadamente:

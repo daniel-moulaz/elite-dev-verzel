@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify'
 import { Role } from '../../generated/prisma/enums.js'
 import { HttpError } from '../../http/error-response.js'
+import { apiDocumentation } from '../../openapi/openapi.operations.js'
 import {
   catalogMovieParamsSchema,
   catalogMoviesQuerySchema,
@@ -22,7 +23,10 @@ export const catalogRoutes: FastifyPluginAsync<CatalogRoutesOptions> = async (
 
   app.get(
     '/movies',
-    { preHandler: organizerOnly },
+    {
+      config: { swaggerTransform: apiDocumentation.catalog.listMovies },
+      preHandler: organizerOnly,
+    },
     async (request) => {
       const parsedQuery = catalogMoviesQuerySchema.safeParse(request.query)
 
@@ -44,7 +48,10 @@ export const catalogRoutes: FastifyPluginAsync<CatalogRoutesOptions> = async (
 
   app.get(
     '/movies/:tmdbId',
-    { preHandler: organizerOnly },
+    {
+      config: { swaggerTransform: apiDocumentation.catalog.getMovie },
+      preHandler: organizerOnly,
+    },
     async (request) => {
       const parsedParams = catalogMovieParamsSchema.safeParse(request.params)
 

@@ -34,6 +34,8 @@ O Fastify é dividido por domínio: `auth`, `movies`, `sessions`, `reservations`
 
 As rotas validam contrato, identidade, papel e ownership. Serviços coordenam transações. O PostgreSQL mantém as garantias finais de unicidade e transição de estado.
 
+A especificação OpenAPI descreve as operações reais da API e fica disponível com Swagger UI em `/docs` e como JSON em `/docs/json`. Os schemas Zod existentes continuam sendo a fonte da validação em runtime; sua conversão para JSON Schema ocorre somente durante a geração da documentação, sem introduzir uma segunda camada de validação.
+
 ## Modelo conceitual
 
 | Entidade | Dados e relações principais | Garantias e índices |
@@ -150,6 +152,6 @@ Contas são fornecidas por seed no MVP; cadastro e recuperação de senha não s
 
 ## Execução, CI e deploy
 
-Em desenvolvimento, o Compose conterá inicialmente apenas PostgreSQL; web e API rodam localmente para feedback rápido. Swagger/OpenAPI e um workflow simples (`install`, lint, typecheck, testes e build) entram após o fluxo P0.
+Em desenvolvimento, o Compose contém apenas PostgreSQL; web e API rodam localmente para feedback rápido. Swagger/OpenAPI já permite inspecionar e testar a API, enquanto o workflow de CI (`install`, lint, typecheck, testes e build) permanece para um bloco posterior.
 
 O alvo de publicação é frontend na Vercel e API/PostgreSQL no Railway, com HTTPS, migrations, seed, CORS e variáveis de ambiente configurados. O smoke test em produção percorre os três papéis. Se o teto de 20 horas apertar, os primeiros cortes são polling, filtros extras, containers de web/API e polimento adicional, não as garantias transacionais nem o deploy.

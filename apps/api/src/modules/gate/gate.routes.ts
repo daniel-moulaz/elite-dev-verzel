@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify'
 import { Role } from '../../generated/prisma/enums.js'
 import { HttpError } from '../../http/error-response.js'
+import { apiDocumentation } from '../../openapi/openapi.operations.js'
 import { consumeTicketBodySchema } from './gate.schemas.js'
 import { consumeGateTicket, listGateSessions } from './gate.service.js'
 
@@ -25,13 +26,21 @@ export const gateRoutes: FastifyPluginAsync<GateRoutesOptions> = async (
 ) => {
   const gateOnly = [app.authenticate, app.authorizeRoles(Role.GATE)]
 
-  app.get('/sessions', { preHandler: gateOnly }, async () =>
-    listGateSessions(),
+  app.get(
+    '/sessions',
+    {
+      config: { swaggerTransform: apiDocumentation.gate.listSessions },
+      preHandler: gateOnly,
+    },
+    async () => listGateSessions(),
   )
 
   app.post(
     '/tickets/consume',
-    { preHandler: gateOnly },
+    {
+      config: { swaggerTransform: apiDocumentation.gate.consumeTicket },
+      preHandler: gateOnly,
+    },
     async (request, reply) => {
       const body = consumeTicketBodySchema.safeParse(request.body)
 

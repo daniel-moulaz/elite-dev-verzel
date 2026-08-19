@@ -6,6 +6,7 @@ const emailSchema = z
   .toLowerCase()
   .max(320)
   .pipe(z.email())
+  .meta({ format: 'email' })
 
 export const loginBodySchema = z.strictObject({
   email: emailSchema,

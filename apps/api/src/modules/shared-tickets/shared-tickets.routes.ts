@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify'
 import { Role } from '../../generated/prisma/enums.js'
 import { HttpError } from '../../http/error-response.js'
+import { apiDocumentation } from '../../openapi/openapi.operations.js'
 import { ticketParamsSchema } from '../tickets/tickets.schemas.js'
 import { sharedTicketParamsSchema } from './shared-tickets.schemas.js'
 import {
@@ -33,7 +34,10 @@ export const privateSharedTicketRoutes: FastifyPluginAsync<
 
   app.post(
     '/:id/share-link',
-    { preHandler: customerOnly },
+    {
+      config: { swaggerTransform: apiDocumentation.sharing.create },
+      preHandler: customerOnly,
+    },
     async (request, reply) => {
       const params = ticketParamsSchema.safeParse(request.params)
 
@@ -59,7 +63,10 @@ export const privateSharedTicketRoutes: FastifyPluginAsync<
 
   app.delete(
     '/:id/share-link',
-    { preHandler: customerOnly },
+    {
+      config: { swaggerTransform: apiDocumentation.sharing.revoke },
+      preHandler: customerOnly,
+    },
     async (request, reply) => {
       const params = ticketParamsSchema.safeParse(request.params)
 
@@ -86,7 +93,10 @@ export const publicSharedTicketRoutes: FastifyPluginAsync<
 > = async (app, options) => {
   app.get(
     '/:token',
-    { logLevel: 'silent' },
+    {
+      config: { swaggerTransform: apiDocumentation.sharing.getPublic },
+      logLevel: 'silent',
+    },
     async (request, reply) => {
       reply.header('Cache-Control', 'no-store')
       reply.header('X-Robots-Tag', 'noindex, nofollow')

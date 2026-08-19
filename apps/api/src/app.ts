@@ -15,6 +15,8 @@ import { registerReservations } from './modules/reservations/index.js'
 import { registerSharedTickets } from './modules/shared-tickets/index.js'
 import { registerSessions } from './modules/sessions/register-sessions.js'
 import { registerTickets } from './modules/tickets/index.js'
+import { apiDocumentation } from './openapi/openapi.operations.js'
+import { registerOpenApi } from './openapi/register-openapi.js'
 
 interface AppDependencies {
   movieCatalog?: MovieCatalog
@@ -25,6 +27,8 @@ export function buildApp(
   dependencies: AppDependencies = {},
 ) {
   const app = Fastify(options)
+  registerOpenApi(app)
+
   const movieCatalog =
     dependencies.movieCatalog ??
     createTmdbCatalog(
@@ -53,7 +57,13 @@ export function buildApp(
     webOrigin: env.WEB_ORIGIN,
   })
 
-  app.get('/health', async () => ({ status: 'ok' }))
+  app.register(async (healthApp) => {
+    healthApp.get(
+      '/health',
+      { config: { swaggerTransform: apiDocumentation.health } },
+      async () => ({ status: 'ok' }),
+    )
+  })
 
   return app
 }

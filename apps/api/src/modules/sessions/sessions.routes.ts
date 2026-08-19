@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify'
 import { Role } from '../../generated/prisma/enums.js'
 import { HttpError } from '../../http/error-response.js'
+import { apiDocumentation } from '../../openapi/openapi.operations.js'
 import type { MovieCatalog } from '../catalog/catalog.types.js'
 import {
   createSessionBodySchema,
@@ -33,7 +34,10 @@ export const organizerSessionRoutes: FastifyPluginAsync<
 
   app.post(
     '/sessions',
-    { preHandler: organizerOnly },
+    {
+      config: { swaggerTransform: apiDocumentation.organizer.createSession },
+      preHandler: organizerOnly,
+    },
     async (request, reply) => {
       const body = createSessionBodySchema.safeParse(request.body)
 
@@ -59,7 +63,10 @@ export const organizerSessionRoutes: FastifyPluginAsync<
 
   app.get(
     '/sessions',
-    { preHandler: organizerOnly },
+    {
+      config: { swaggerTransform: apiDocumentation.organizer.listSessions },
+      preHandler: organizerOnly,
+    },
     async (request) => {
       const organizerId = request.authUser?.id
 
@@ -73,7 +80,10 @@ export const organizerSessionRoutes: FastifyPluginAsync<
 
   app.get(
     '/sessions/:id',
-    { preHandler: organizerOnly },
+    {
+      config: { swaggerTransform: apiDocumentation.organizer.getSession },
+      preHandler: organizerOnly,
+    },
     async (request) => {
       const params = sessionParamsSchema.safeParse(request.params)
 
@@ -93,7 +103,10 @@ export const organizerSessionRoutes: FastifyPluginAsync<
 
   app.patch(
     '/sessions/:id',
-    { preHandler: organizerOnly },
+    {
+      config: { swaggerTransform: apiDocumentation.organizer.updateSession },
+      preHandler: organizerOnly,
+    },
     async (request) => {
       const params = sessionParamsSchema.safeParse(request.params)
       const body = updateSessionBodySchema.safeParse(request.body)
@@ -119,7 +132,10 @@ export const organizerSessionRoutes: FastifyPluginAsync<
 
   app.post(
     '/sessions/:id/publish',
-    { preHandler: organizerOnly },
+    {
+      config: { swaggerTransform: apiDocumentation.organizer.publishSession },
+      preHandler: organizerOnly,
+    },
     async (request) => {
       const params = sessionParamsSchema.safeParse(request.params)
 

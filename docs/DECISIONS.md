@@ -237,3 +237,21 @@ Aplicar apenas escala, hover e cantos novos à V2, copiar a composição de uma 
 ### Trade-offs
 
 O resumo público não oferece backdrop; por isso a atmosfera reutiliza o pôster com blur e gradientes, sem fetch ou contrato adicional. A superfície clara exige estilos de contraste cuidadosamente escopados, mas mantém backend, dependências e arquitetura da informação intactos.
+
+## ADR-014 — OpenAPI gerado sem duplicar validação
+
+### Contexto
+
+O avaliador precisa inspecionar e experimentar a API sem depender primeiro do frontend ou de conhecimento prévio das rotas. Ao mesmo tempo, os contratos já são validados com Zod e não devem ser reestruturados apenas para produzir documentação.
+
+### Decisão
+
+Usar os plugins oficiais `@fastify/swagger` e `@fastify/swagger-ui`, compatíveis com o Fastify 5, e publicar a interface em `/docs` e o documento em `/docs/json`. As 23 operações reais são organizadas por domínio, com bearer JWT declarado nas rotas protegidas e indicação concisa do papel exigido. A conversão dos schemas Zod é exclusiva da geração OpenAPI; a autorização e a validação em runtime permanecem no backend existente.
+
+### Alternativas consideradas
+
+Manter somente uma lista de endpoints no README, duplicar todos os contratos em JSON Schema ou introduzir outra biblioteca de validação e um type provider em toda a API.
+
+### Trade-offs
+
+A solução oferece documentação interativa com baixo impacto arquitetural e reaproveita os contratos de entrada existentes. Alguns schemas de resposta precisam ser descritos manualmente para representar os DTOs públicos, portanto devem permanecer sincronizados com os serviços; em compensação, evita-se uma refatoração ampla ou uma segunda validação em runtime.

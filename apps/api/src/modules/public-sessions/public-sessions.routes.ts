@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify'
 import { HttpError } from '../../http/error-response.js'
+import { apiDocumentation } from '../../openapi/openapi.operations.js'
 import {
   listPublicSessionsQuerySchema,
   publicSessionParamsSchema,
@@ -15,33 +16,45 @@ function invalidRequest(message = 'A requisição contém dados inválidos.') {
 }
 
 export const publicSessionRoutes: FastifyPluginAsync = async (app) => {
-  app.get('/', async (request) => {
-    const query = listPublicSessionsQuerySchema.safeParse(request.query)
+  app.get(
+    '/',
+    { config: { swaggerTransform: apiDocumentation.sessions.list } },
+    async (request) => {
+      const query = listPublicSessionsQuerySchema.safeParse(request.query)
 
-    if (!query.success) {
-      throw invalidRequest('Informe uma busca válida.')
-    }
+      if (!query.success) {
+        throw invalidRequest('Informe uma busca válida.')
+      }
 
-    return { sessions: await listPublicSessions(query.data.q) }
-  })
+      return { sessions: await listPublicSessions(query.data.q) }
+    },
+  )
 
-  app.get('/:id', async (request) => {
-    const params = publicSessionParamsSchema.safeParse(request.params)
+  app.get(
+    '/:id',
+    { config: { swaggerTransform: apiDocumentation.sessions.get } },
+    async (request) => {
+      const params = publicSessionParamsSchema.safeParse(request.params)
 
-    if (!params.success) {
-      throw invalidRequest('Informe um identificador de sessão válido.')
-    }
+      if (!params.success) {
+        throw invalidRequest('Informe um identificador de sessão válido.')
+      }
 
-    return getPublicSession(params.data.id)
-  })
+      return getPublicSession(params.data.id)
+    },
+  )
 
-  app.get('/:id/seats', async (request) => {
-    const params = publicSessionParamsSchema.safeParse(request.params)
+  app.get(
+    '/:id/seats',
+    { config: { swaggerTransform: apiDocumentation.sessions.seats } },
+    async (request) => {
+      const params = publicSessionParamsSchema.safeParse(request.params)
 
-    if (!params.success) {
-      throw invalidRequest('Informe um identificador de sessão válido.')
-    }
+      if (!params.success) {
+        throw invalidRequest('Informe um identificador de sessão válido.')
+      }
 
-    return getPublicSessionSeats(params.data.id)
-  })
+      return getPublicSessionSeats(params.data.id)
+    },
+  )
 }
