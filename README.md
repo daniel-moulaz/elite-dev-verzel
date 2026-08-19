@@ -1,5 +1,7 @@
 # Elite Dev Verzel
 
+[![CI](https://github.com/daniel-moulaz/elite-dev-verzel/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/daniel-moulaz/elite-dev-verzel/actions/workflows/ci.yml)
+
 SEPTEM é a identidade visível da plataforma de sessões de cinema deste desafio Full Stack da Verzel. O fluxo cobre publicação pelo organizador, escolha e hold de assentos, pagamento simulado, emissão de ingresso com QR assinado, compartilhamento seguro e consumo atômico pela portaria.
 
 ## Requisitos

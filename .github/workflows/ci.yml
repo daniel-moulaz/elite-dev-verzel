@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality gates
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://elite_dev:ci_only_password@127.0.0.1:5432/elite_dev_verzel?schema=public
+      JWT_SECRET: ci_only_jwt_secret_never_use_in_production_2026
+      TICKET_SIGNING_SECRET: ci_only_ticket_secret_never_use_in_production_2026
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: elite_dev
+          POSTGRES_PASSWORD: ci_only_password
+          POSTGRES_DB: elite_dev_verzel
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U elite_dev -d elite_dev_verzel"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Apply database migrations
+        run: npm run db:migrate:deploy
+
+      - name: Seed test fixtures
+        run: npm run db:seed
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck --workspaces --if-present
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build --workspaces --if-present

@@ -255,3 +255,21 @@ Manter somente uma lista de endpoints no README, duplicar todos os contratos em 
 ### Trade-offs
 
 A solução oferece documentação interativa com baixo impacto arquitetural e reaproveita os contratos de entrada existentes. Alguns schemas de resposta precisam ser descritos manualmente para representar os DTOs públicos, portanto devem permanecer sincronizados com os serviços; em compensação, evita-se uma refatoração ampla ou uma segunda validação em runtime.
+
+## ADR-015 — CI com PostgreSQL real e banco vazio
+
+### Contexto
+
+As regras críticas dependem de transações, locks e constraints do PostgreSQL. A entrega também precisa demonstrar que um checkout limpo prepara o schema sem estado prévio ou serviços externos reais.
+
+### Decisão
+
+Executar a CI no GitHub Actions com Node.js 22 e PostgreSQL 17 como service container. Após a instalação reproduzível com `npm ci`, gerar o Prisma Client, aplicar `prisma migrate deploy` em banco vazio e carregar os dados de demonstração exigidos pela suíte. Lint, typecheck, testes e builds da API e do frontend são gates obrigatórios. Todas as credenciais são artificiais, e a fronteira da TMDb permanece simulada nos testes, sem GitHub Secrets.
+
+### Alternativas consideradas
+
+SQLite, banco mockado, `prisma db push`, banco compartilhado já preparado, chamada real à TMDb, múltiplos jobs ou matrizes de sistema operacional e versão do Node.
+
+### Trade-offs
+
+O banco real aumenta a confiança nas migrations e nas regras concorrentes, ao custo de uma execução mais lenta que testes isolados. Um job sequencial reduz duplicação e facilita a avaliação, mas não valida deploy nem disponibilidade da TMDb, que permanecem fora deste bloco.

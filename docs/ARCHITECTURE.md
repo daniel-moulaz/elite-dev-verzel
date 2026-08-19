@@ -152,6 +152,6 @@ Contas são fornecidas por seed no MVP; cadastro e recuperação de senha não s
 
 ## Execução, CI e deploy
 
-Em desenvolvimento, o Compose contém apenas PostgreSQL; web e API rodam localmente para feedback rápido. Swagger/OpenAPI já permite inspecionar e testar a API, enquanto o workflow de CI (`install`, lint, typecheck, testes e build) permanece para um bloco posterior.
+Em desenvolvimento, o Compose contém apenas PostgreSQL; web e API rodam localmente para feedback rápido. Swagger/OpenAPI permite inspecionar e testar a API. No GitHub Actions, um único job usa PostgreSQL 17 real, instala pelo lockfile, gera o Prisma Client, aplica as migrations em banco vazio, carrega as fixtures exigidas pela suíte e executa lint, typecheck, testes e builds.
 
 O alvo de publicação é frontend na Vercel e API/PostgreSQL no Railway, com HTTPS, migrations, seed, CORS e variáveis de ambiente configurados. O smoke test em produção percorre os três papéis. Se o teto de 20 horas apertar, os primeiros cortes são polling, filtros extras, containers de web/API e polimento adicional, não as garantias transacionais nem o deploy.
