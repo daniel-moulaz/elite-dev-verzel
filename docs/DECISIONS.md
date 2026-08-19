@@ -183,3 +183,57 @@ Maximizar opcionais, suportar mais domínios ou adiar testes e deploy para o fim
 ### Trade-offs
 
 O produto terá menos amplitude, mas preserva robustez, documentação e uma demonstração ponta a ponta. Recursos P1 só começam após P0 funcional e verificável.
+
+## ADR-011 — Identidade SEPTEM e linguagem por jornada
+
+### Contexto
+
+A primeira direção visual era funcional, porém excessivamente editorial e genérica. O teste manual conduzido pelo candidato mostrou baixa densidade de produto: slogans, espaço vazio e títulos de exibição recebiam mais atenção que filmes, horários, salas e preços. A interface ficou visualmente desalinhada da profundidade já existente no backend.
+
+### Decisão
+
+Rejeitar essa direção e adotar a marca visível `SEPTEM`, referência à sétima arte. A programação passa a colocar pôsteres, dados da sessão, escolha de lugares e compra acima de hero ou slogans. Customer e Organizer compartilham uma identidade contemporânea de rede de cinemas; Gate mantém linguagem própria, operacional e orientada à leitura rápida dos quatro resultados.
+
+### Alternativas consideradas
+
+Polir apenas cores e espaçamentos da interface anterior, adotar um dashboard SaaS genérico ou aplicar a mesma linguagem promocional a todas as jornadas.
+
+### Trade-offs
+
+O redesign exige revisão transversal de componentes, estados e responsividade, mas não altera contratos nem regras de negócio. Separar visualmente o Gate reduz uniformidade entre áreas em favor de clareza operacional e segurança na portaria.
+
+## ADR-012 — Programação consumer orientada por data, filme e horário
+
+### Contexto
+
+O M6 v1 melhorou a identidade SEPTEM e as telas críticas, mas a revisão humana concluiu que a Home ainda preservava o modelo mental da primeira solução: uma lista de cards independentes de sessões. Interfaces reais de bilheteria e redes de cinema foram estudadas para entender sua arquitetura de informação, sem copiar apresentação ou componentes.
+
+### Decisão
+
+Organizar a experiência consumer na sequência `contexto/local → data → filme → horário → assento`. Um filme real da programação abre a página; datas são derivadas das sessões existentes; sessões da data são agrupadas por filme, cinema e sala; e cada horário é a ação que leva à escolha de lugares. Referências externas serviram apenas à hierarquia da informação. Componentes prontos analisados foram deliberadamente rejeitados para evitar novas dependências e aparência de template.
+
+### Alternativas consideradas
+
+Manter os cards de sessão com novo acabamento, copiar padrões visuais de uma rede existente ou instalar carrossel e biblioteca de UI.
+
+### Trade-offs
+
+A transformação client-side permanece simples e não exige contrato novo, mas agrupa filmes por título e data de lançamento porque o resumo público não expõe `tmdbId`. Datas e horários seguem o fuso do navegador, coerente com o comportamento já existente.
+
+## ADR-013 — Cinema marquee e sistema de superfícies consumer
+
+### Contexto
+
+A V2 corrigiu o modelo mental da Home, porém a revisão visual humana ainda a considerou próxima demais da primeira direção: quase toda preta, composta por retângulos e divisores, com pôsteres tratados como miniaturas. A organização estava correta, mas a linguagem ainda parecia um wireframe bem estilizado em vez de uma rede de cinema.
+
+### Decisão
+
+Adotar na Home o sistema `Cinema Black + SEPTEM Red + Ticket Ivory`. Um filme real ocupa um stage cinematográfico criado a partir de seu próprio pôster; um rail dá protagonismo aos filmes em cartaz; e datas, cinemas, salas e horários vivem em uma prancha marfim conectada visualmente ao ingresso. Hierarquia, superfícies, imagem e espaçamento substituem a maior parte das bordas. Interfaces reais foram pesquisadas como referência de princípios, nunca como templates ou layouts a copiar.
+
+### Alternativas consideradas
+
+Aplicar apenas escala, hover e cantos novos à V2, copiar a composição de uma rede existente ou instalar componentes de carrossel e bibliotecas de UI/animação.
+
+### Trade-offs
+
+O resumo público não oferece backdrop; por isso a atmosfera reutiliza o pôster com blur e gradientes, sem fetch ou contrato adicional. A superfície clara exige estilos de contraste cuidadosamente escopados, mas mantém backend, dependências e arquitetura da informação intactos.

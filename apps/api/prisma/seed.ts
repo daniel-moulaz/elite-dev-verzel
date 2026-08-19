@@ -93,7 +93,7 @@ async function seed() {
           organizerId: organizer.id,
           status: SessionStatus.PUBLISHED,
           startsAt: firstSessionStartsAt,
-          venueName: 'Cine Verzel',
+          venueName: 'SEPTEM Paulista',
           roomName: 'Sala Cobre',
           address: 'Avenida Paulista, 1000 — São Paulo, SP',
           priceCents: 3000,
@@ -101,7 +101,7 @@ async function seed() {
           movieTitle: 'Interestelar',
           movieOverview:
             'Uma equipe atravessa o espaço em busca de um novo lar para a humanidade.',
-          moviePosterPath: '/nBNZadXqJSdt05SHLqgT0HuC5Gm.jpg',
+          moviePosterPath: '/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg',
           movieBackdropPath: '/xJHokMbljvjADYdit5fK5VQsXEG.jpg',
           movieReleaseDate: new Date('2014-11-05T00:00:00.000Z'),
           movieRuntimeMinutes: 169,
@@ -109,10 +109,11 @@ async function seed() {
         },
         update: {
           startsAt: firstSessionStartsAt,
-          venueName: 'Cine Verzel',
+          venueName: 'SEPTEM Paulista',
           roomName: 'Sala Cobre',
           address: 'Avenida Paulista, 1000 — São Paulo, SP',
           priceCents: 3000,
+          moviePosterPath: '/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg',
           publishedAt: new Date(),
         },
       })
@@ -124,7 +125,7 @@ async function seed() {
           organizerId: organizer.id,
           status: SessionStatus.PUBLISHED,
           startsAt: secondSessionStartsAt,
-          venueName: 'Cine Verzel',
+          venueName: 'SEPTEM Paulista',
           roomName: 'Sala Marfim',
           address: 'Avenida Paulista, 1000 — São Paulo, SP',
           priceCents: 2600,
@@ -140,7 +141,7 @@ async function seed() {
         },
         update: {
           startsAt: secondSessionStartsAt,
-          venueName: 'Cine Verzel',
+          venueName: 'SEPTEM Paulista',
           roomName: 'Sala Marfim',
           address: 'Avenida Paulista, 1000 — São Paulo, SP',
           priceCents: 2600,

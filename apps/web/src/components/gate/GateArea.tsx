@@ -17,6 +17,9 @@ import {
   formatSessionDate,
   tmdbPosterUrl,
 } from '../organizer/formatters'
+import { BrandLockup } from '../common/BrandLockup'
+import { PosterImage } from '../common/PosterImage'
+import { TmdbAttribution } from '../public/TmdbAttribution'
 import { QrScanner } from './QrScanner'
 
 interface GateAreaProps {
@@ -33,22 +36,22 @@ type SessionsState =
 const resultContent = {
   VALID: {
     icon: '✓',
-    title: 'Ingresso válido',
-    description: 'Entrada liberada. Este ingresso foi consumido agora.',
+    title: 'Entrada liberada',
+    description: 'Ingresso válido e consumido agora.',
   },
   INVALID: {
     icon: '×',
-    title: 'Ingresso inválido',
-    description: 'A credencial não foi reconhecida. Não permita a entrada.',
+    title: 'Entrada negada',
+    description: 'Ingresso inválido. A credencial não foi reconhecida.',
   },
   ALREADY_USED: {
     icon: '!',
-    title: 'Ingresso já utilizado',
+    title: 'Entrada já registrada',
     description: 'Este ingresso já havia sido consumido nesta sessão.',
   },
   WRONG_EVENT: {
     icon: '↔',
-    title: 'Ingresso de outra sessão',
+    title: 'Sessão incorreta',
     description: 'O ingresso não pertence à sessão selecionada. Não foi consumido.',
   },
 } as const
@@ -193,11 +196,8 @@ export function GateArea({ accessToken, user, onLogout }: GateAreaProps) {
     <div className="gate-shell">
       <header className="gate-topbar">
         <div className="gate-brand">
-          <span className="brand-mark" aria-hidden="true">E</span>
-          <span>
-            <strong>Elite Cinema</strong>
-            <small>Operação de portaria</small>
-          </span>
+          <BrandLockup context="Portaria" />
+          <span className="gate-mode">Operação de acesso</span>
         </div>
         <div className="gate-account">
           <span>{user.name}</span>
@@ -250,11 +250,13 @@ export function GateArea({ accessToken, user, onLogout }: GateAreaProps) {
                       className="gate-session-card"
                       onClick={() => selectSession(session)}
                     >
-                      {posterUrl ? (
-                        <img src={posterUrl} alt="" />
-                      ) : (
-                        <span className="gate-poster-placeholder" aria-hidden="true">E</span>
-                      )}
+                      <PosterImage
+                        src={posterUrl}
+                        title={session.movie.title}
+                        className="gate-session-poster"
+                        decorative
+                        loading="lazy"
+                      />
                       <span className="gate-session-copy">
                         <span className="gate-session-time">
                           {formatSessionDate(session.startsAt)}
@@ -368,6 +370,9 @@ export function GateArea({ accessToken, user, onLogout }: GateAreaProps) {
           </section>
         )}
       </main>
+      <div className="gate-attribution">
+        <TmdbAttribution />
+      </div>
     </div>
   )
 }
@@ -402,6 +407,7 @@ function GateResult({
     >
       <span className="gate-result-icon" aria-hidden="true">{content.icon}</span>
       <p className="section-kicker">Resultado da validação</p>
+      <span className="gate-result-code">{result.result}</span>
       <h2>{content.title}</h2>
       <p className="gate-result-description">{content.description}</p>
 

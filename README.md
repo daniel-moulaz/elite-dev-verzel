@@ -1,6 +1,6 @@
 # Elite Dev Verzel
 
-Plataforma de sessões de cinema do desafio Full Stack da Verzel. Até o M5, o fluxo cobre publicação pelo organizador, escolha e hold de assentos, pagamento simulado, emissão de ingresso com QR assinado, compartilhamento seguro e consumo atômico pela portaria.
+SEPTEM é a identidade visível da plataforma de sessões de cinema deste desafio Full Stack da Verzel. O fluxo cobre publicação pelo organizador, escolha e hold de assentos, pagamento simulado, emissão de ingresso com QR assinado, compartilhamento seguro e consumo atômico pela portaria.
 
 ## Requisitos
 
@@ -70,7 +70,7 @@ O frontend armazena somente o access token em `sessionStorage` e confirma tokens
 ## Fluxo de demonstração do ingresso
 
 1. Entre como `customer1@demo.local` e escolha uma sessão/assentos.
-2. No resumo da reserva, selecione **Simular pagamento aprovado** para emitir um ingresso ou **Simular pagamento recusado** para liberar os lugares.
+2. No resumo da reserva, selecione **Aprovar pagamento** para emitir um ingresso ou **Recusar pagamento** para liberar os lugares.
 3. Abra **Meus ingressos** para visualizar o QR e o código manual.
 4. Em um ingresso, gere, copie, rotacione ou revogue `/shared/:token`; a página pública não mostra dados pessoais.
 

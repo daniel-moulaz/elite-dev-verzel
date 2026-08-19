@@ -12,6 +12,7 @@ import {
   type AuthenticatedUser,
   type Reservation,
 } from './api'
+import { BrandLockup } from './components/common/BrandLockup'
 import { GateArea } from './components/gate/GateArea'
 import { OrganizerArea } from './components/organizer/OrganizerArea'
 import { PublicCatalog } from './components/public/PublicCatalog'
@@ -118,6 +119,13 @@ interface LoginScreenProps {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }
 
+const demoAccounts = [
+  { label: 'Organizador', email: 'organizer@demo.local' },
+  { label: 'Cliente', email: 'customer1@demo.local' },
+  { label: 'Cliente com ingresso', email: 'customer2@demo.local' },
+  { label: 'Portaria', email: 'gate@demo.local' },
+] as const
+
 function LoginScreen({
   notice,
   errorMessage,
@@ -125,17 +133,28 @@ function LoginScreen({
   onBack,
   onSubmit,
 }: LoginScreenProps) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+
+  function fillDemoAccount(accountEmail: string) {
+    setEmail(accountEmail)
+    setPassword('Demo@123')
+  }
+
   return (
     <main className="app-shell login-shell">
       <section className="auth-panel">
-        <button type="button" className="back-button" onClick={onBack}>
-          <span aria-hidden="true">←</span> Voltar à programação
-        </button>
-        <p className="eyebrow">Elite Cinema</p>
-        <h1>Entrar</h1>
+        <div className="login-panel-header">
+          <BrandLockup />
+          <button type="button" className="back-button" onClick={onBack}>
+            <span aria-hidden="true">←</span> Programação
+          </button>
+        </div>
+        <p className="eyebrow">Acesso à plataforma</p>
+        <h1>Entre na SEPTEM</h1>
         <p className="intro">
-          Entre como cliente para reservar lugares ou use outra conta de
-          demonstração para acessar sua respectiva área.
+          Use uma conta de demonstração para comprar ingressos, organizar
+          sessões ou operar a portaria.
         </p>
 
         {notice ? (
@@ -151,6 +170,8 @@ function LoginScreen({
               id="email"
               name="email"
               type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
               autoComplete="email"
               required
               disabled={isSubmitting}
@@ -163,6 +184,8 @@ function LoginScreen({
               id="password"
               name="password"
               type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
               autoComplete="current-password"
               required
               disabled={isSubmitting}
@@ -179,6 +202,27 @@ function LoginScreen({
             {isSubmitting ? 'Entrando…' : 'Entrar'}
           </button>
         </form>
+
+        <div className="demo-access" aria-labelledby="demo-access-title">
+          <div>
+            <strong id="demo-access-title">Acessos de demonstração</strong>
+            <small>Senha comum: <code>Demo@123</code></small>
+          </div>
+          <div className="demo-account-grid">
+            {demoAccounts.map((account) => (
+              <button
+                type="button"
+                className="demo-account-button"
+                key={account.email}
+                onClick={() => fillDemoAccount(account.email)}
+                disabled={isSubmitting}
+              >
+                <span>{account.label}</span>
+                <small>{account.email}</small>
+              </button>
+            ))}
+          </div>
+        </div>
       </section>
     </main>
   )
@@ -314,7 +358,8 @@ export function App() {
     return (
       <main className="app-shell" aria-busy="true">
         <section className="auth-panel status-panel" aria-live="polite">
-          <p className="eyebrow">Elite Cinema</p>
+          <BrandLockup />
+          <p className="eyebrow">Acesso seguro</p>
           <h1>Validando sua sessão</h1>
           <p>Aguarde enquanto confirmamos seu acesso.</p>
         </section>
@@ -392,6 +437,11 @@ export function App() {
         onLogin={() => requestLogin(routePath(route))}
         onLogout={handleLogout}
         onTickets={() => navigate('/me/tickets')}
+        activeItem={
+          route.name === 'tickets' || route.name === 'ticket'
+            ? 'tickets'
+            : 'programming'
+        }
       />
       <main>
         {route.name === 'session' ? (

@@ -6,6 +6,7 @@ import {
   type CatalogMovie,
 } from '../../api'
 import { movieYear, tmdbPosterUrl } from './formatters'
+import { PosterImage } from '../common/PosterImage'
 
 interface MoviePickerProps {
   accessToken: string
@@ -60,6 +61,7 @@ export function MoviePicker({
           return
         }
 
+        setMovies([])
         setError(
           requestError instanceof ApiError
             ? requestError.message
@@ -113,13 +115,11 @@ export function MoviePicker({
         aria-busy={disabled}
         aria-labelledby="selected-movie-title"
       >
-        {posterUrl ? (
-          <img src={posterUrl} alt={`Pôster de ${selectedMovie.title}`} />
-        ) : (
-          <div className="poster-placeholder" aria-hidden="true">
-            Sem pôster
-          </div>
-        )}
+        <PosterImage
+          src={posterUrl}
+          title={selectedMovie.title}
+          className="selected-movie-poster"
+        />
         <div>
           <p className="section-kicker">Filme selecionado</p>
           <h2 id="selected-movie-title">{selectedMovie.title}</h2>
@@ -245,18 +245,12 @@ export function MoviePicker({
 
             return (
               <article className="movie-card" key={movie.id}>
-                {posterUrl ? (
-                  <img
-                    src={posterUrl}
-                    alt={`Pôster de ${movie.title}`}
-                    loading="lazy"
-                    decoding="async"
-                  />
-                ) : (
-                  <div className="poster-placeholder" aria-hidden="true">
-                    Sem pôster
-                  </div>
-                )}
+                <PosterImage
+                  src={posterUrl}
+                  title={movie.title}
+                  className="movie-card-poster"
+                  loading="lazy"
+                />
                 <div className="movie-card-content">
                   <h4>{movie.title}</h4>
                   <p>{movieYear(movie.releaseDate)}</p>

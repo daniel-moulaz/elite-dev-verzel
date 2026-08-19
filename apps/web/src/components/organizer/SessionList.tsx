@@ -6,9 +6,11 @@ import {
 } from '../../api'
 import {
   formatPrice,
-  formatSessionDate,
+  formatCompactSessionDay,
+  formatSessionTime,
   tmdbPosterUrl,
 } from './formatters'
+import { PosterImage } from '../common/PosterImage'
 
 interface SessionListProps {
   accessToken: string
@@ -65,7 +67,7 @@ export function SessionList({
       </div>
 
       {isLoading ? (
-        <div className="content-state" aria-live="polite">
+        <div className="content-state" aria-busy="true" aria-live="polite">
           <p className="section-kicker">Carregando</p>
           <h2>Buscando suas sessões…</h2>
         </div>
@@ -104,23 +106,16 @@ export function SessionList({
             const posterUrl = tmdbPosterUrl(session.movie.posterPath)
 
             return (
-              <article className="session-card" key={session.id}>
-                {posterUrl ? (
-                  <img
-                    className="session-poster"
-                    src={posterUrl}
-                    alt={`Pôster de ${session.movie.title}`}
-                    loading="lazy"
-                    decoding="async"
-                  />
-                ) : (
-                  <div
-                    className="session-poster poster-placeholder"
-                    aria-hidden="true"
-                  >
-                    Sem pôster
-                  </div>
-                )}
+              <article
+                className={`session-card session-${session.status.toLowerCase()}`}
+                key={session.id}
+              >
+                <PosterImage
+                  src={posterUrl}
+                  title={session.movie.title}
+                  className="session-poster"
+                  loading="lazy"
+                />
                 <div className="session-card-body">
                   <div className="session-card-heading">
                     <div>
@@ -131,9 +126,10 @@ export function SessionList({
                       </span>
                       <h2>{session.movie.title}</h2>
                     </div>
-                    <span className="session-date">
-                      {formatSessionDate(session.startsAt)}
-                    </span>
+                    <time className="session-date" dateTime={session.startsAt}>
+                      <strong>{formatSessionTime(session.startsAt)}</strong>
+                      <span>{formatCompactSessionDay(session.startsAt)}</span>
+                    </time>
                   </div>
                   <dl className="session-facts">
                     <div>

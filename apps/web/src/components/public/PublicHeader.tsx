@@ -1,4 +1,5 @@
 import type { AuthenticatedUser } from '../../api'
+import { BrandLockup } from '../common/BrandLockup'
 
 interface PublicHeaderProps {
   user: AuthenticatedUser | undefined
@@ -7,6 +8,7 @@ interface PublicHeaderProps {
   onLogout: () => void
   onTickets: () => void
   publicOnly?: boolean
+  activeItem?: 'programming' | 'tickets'
 }
 
 export function PublicHeader({
@@ -16,38 +18,47 @@ export function PublicHeader({
   onLogout,
   onTickets,
   publicOnly = false,
+  activeItem,
 }: PublicHeaderProps) {
   return (
     <header className="topbar public-topbar">
-      <button
-        type="button"
-        className="brand-button"
-        onClick={onHome}
-        aria-label="Ir para a programação"
-      >
-        <span className="brand-mark" aria-hidden="true">
-          E
-        </span>
-        <span>
-          <strong>Elite Cinema</strong>
-          <small>Sessões em cartaz</small>
-        </span>
-      </button>
+      <div className="header-primary">
+        <button
+          type="button"
+          className="brand-button"
+          onClick={onHome}
+          aria-label="SEPTEM Cinemas — ir para a programação"
+        >
+          <BrandLockup />
+        </button>
+
+        <nav className="main-navigation" aria-label="Navegação principal">
+          <button
+            type="button"
+            className={`nav-link ${activeItem === 'programming' ? 'is-active' : ''}`.trim()}
+            aria-current={activeItem === 'programming' ? 'page' : undefined}
+            onClick={onHome}
+          >
+            Programação
+          </button>
+          {!publicOnly && user?.role === 'CUSTOMER' ? (
+            <button
+              type="button"
+              className={`nav-link ${activeItem === 'tickets' ? 'is-active' : ''}`.trim()}
+              aria-current={activeItem === 'tickets' ? 'page' : undefined}
+              onClick={onTickets}
+            >
+              Meus ingressos
+            </button>
+          ) : null}
+        </nav>
+      </div>
 
       {publicOnly ? null : (
         <div className="account-actions">
           {user ? (
             <>
-              {user.role === 'CUSTOMER' ? (
-                <button
-                  type="button"
-                  className="text-button"
-                  onClick={onTickets}
-                >
-                  Meus ingressos
-                </button>
-              ) : null}
-              <span className="account-name">Olá, {user.name}</span>
+              <span className="account-name" title={user.email}>{user.name}</span>
               <button type="button" className="text-button" onClick={onLogout}>
                 Sair
               </button>

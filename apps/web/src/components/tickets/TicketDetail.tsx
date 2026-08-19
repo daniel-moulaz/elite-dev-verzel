@@ -9,6 +9,11 @@ import {
 } from '../../api'
 import { DigitalTicket } from './DigitalTicket'
 
+interface ShareFeedback {
+  type: 'success' | 'error'
+  message: string
+}
+
 interface TicketDetailProps {
   accessToken: string
   ticketId: string
@@ -31,7 +36,7 @@ export function TicketDetail({
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [errorMessage, setErrorMessage] = useState('')
   const [shareLink, setShareLink] = useState<ShareLinkResult | null>(null)
-  const [shareMessage, setShareMessage] = useState('')
+  const [shareFeedback, setShareFeedback] = useState<ShareFeedback | null>(null)
   const [shareAction, setShareAction] = useState<'idle' | 'creating' | 'revoking'>('idle')
   const [reloadKey, setReloadKey] = useState(0)
 
@@ -67,7 +72,7 @@ export function TicketDetail({
 
   async function generateShareLink() {
     setShareAction('creating')
-    setShareMessage('')
+    setShareFeedback(null)
 
     try {
       const result = await createTicketShareLink(accessToken, ticketId)
@@ -77,15 +82,17 @@ export function TicketDetail({
           ? { ...current, shareLink: { expiresAt: result.expiresAt } }
           : current,
       )
-      setShareMessage(
-        'Link criado. Gerar outro link invalida este imediatamente.',
-      )
+      setShareFeedback({
+        type: 'success',
+        message: 'Link criado. Gerar outro link invalida este imediatamente.',
+      })
     } catch (error) {
-      setShareMessage(
-        error instanceof ApiError
+      setShareFeedback({
+        type: 'error',
+        message: error instanceof ApiError
           ? error.message
           : 'Não foi possível gerar o link.',
-      )
+      })
     } finally {
       setShareAction('idle')
     }
@@ -97,21 +104,30 @@ export function TicketDetail({
     }
 
     if (!navigator.clipboard) {
-      setShareMessage('Copie o endereço exibido abaixo.')
+      setShareFeedback({
+        type: 'success',
+        message: 'Copie o endereço exibido abaixo.',
+      })
       return
     }
 
     try {
       await navigator.clipboard.writeText(shareLink.url)
-      setShareMessage('Link copiado para a área de transferência.')
+      setShareFeedback({
+        type: 'success',
+        message: 'Link copiado para a área de transferência.',
+      })
     } catch {
-      setShareMessage('Não foi possível copiar automaticamente. Copie o endereço abaixo.')
+      setShareFeedback({
+        type: 'error',
+        message: 'Não foi possível copiar automaticamente. Copie o endereço abaixo.',
+      })
     }
   }
 
   async function revokeShareLink() {
     setShareAction('revoking')
-    setShareMessage('')
+    setShareFeedback(null)
 
     try {
       await revokeTicketShareLink(accessToken, ticketId)
@@ -119,13 +135,17 @@ export function TicketDetail({
       setTicket((current) =>
         current ? { ...current, shareLink: null } : current,
       )
-      setShareMessage('Link revogado. Ele não pode mais abrir o ingresso.')
+      setShareFeedback({
+        type: 'success',
+        message: 'Link revogado. Ele não pode mais abrir o ingresso.',
+      })
     } catch (error) {
-      setShareMessage(
-        error instanceof ApiError
+      setShareFeedback({
+        type: 'error',
+        message: error instanceof ApiError
           ? error.message
           : 'Não foi possível revogar o link.',
-      )
+      })
     } finally {
       setShareAction('idle')
     }
@@ -199,13 +219,18 @@ export function TicketDetail({
           </div>
         ) : ticket.shareLink ? (
           <p className="active-share-note">
-            Existe um link ativo até {shareExpirationLabel(ticket.shareLink.expiresAt)}.
-            Como o token não é armazenado em texto puro, gere outro para exibir uma nova URL.
+            Há um link ativo até {shareExpirationLabel(ticket.shareLink.expiresAt)}.
+            Gere um novo para obter outra URL; o link anterior será invalidado.
           </p>
         ) : null}
 
-        {shareMessage ? (
-          <p className="message share-message" role="status">{shareMessage}</p>
+        {shareFeedback ? (
+          <p
+            className={`message share-message share-${shareFeedback.type}`}
+            role={shareFeedback.type === 'error' ? 'alert' : 'status'}
+          >
+            {shareFeedback.message}
+          </p>
         ) : null}
 
         <div className="share-actions">

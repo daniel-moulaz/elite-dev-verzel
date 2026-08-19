@@ -8,6 +8,7 @@ import {
   formatSessionDate,
   tmdbPosterUrl,
 } from '../organizer/formatters'
+import { PosterImage } from '../common/PosterImage'
 
 interface TicketListProps {
   accessToken: string
@@ -99,7 +100,7 @@ export function TicketList({
 
       {tickets.length === 0 ? (
         <div className="content-state public-state empty-state">
-          <span className="empty-ticket" aria-hidden="true">E</span>
+          <span className="empty-ticket" aria-hidden="true">S</span>
           <h2>Nenhum ingresso por aqui.</h2>
           <p>Escolha uma sessão, reserve seus lugares e aprove o pagamento simulado.</p>
           <button type="button" onClick={onBack}>Ver programação</button>
@@ -111,14 +112,12 @@ export function TicketList({
 
             return (
               <article className="my-ticket-card" key={ticket.id}>
-                {posterUrl ? (
-                  <img
-                    src={posterUrl}
-                    alt={`Pôster de ${ticket.session.movie.title}`}
-                  />
-                ) : (
-                  <div className="ticket-poster-placeholder" aria-hidden="true">E</div>
-                )}
+                <PosterImage
+                  src={posterUrl}
+                  title={ticket.session.movie.title}
+                  className="my-ticket-poster"
+                  loading="lazy"
+                />
                 <div className="my-ticket-card-body">
                   <div>
                     <p className="section-kicker">Assento {ticket.seat.label}</p>
@@ -138,7 +137,11 @@ export function TicketList({
                     <span className={`ticket-status-badge ticket-status-${ticket.status.toLowerCase()}`}>
                       {ticket.status === 'VALID' ? 'Válido' : 'Utilizado'}
                     </span>
-                    <button type="button" onClick={() => onOpenTicket(ticket.id)}>
+                    <button
+                      type="button"
+                      onClick={() => onOpenTicket(ticket.id)}
+                      aria-label={`Abrir ingresso para ${ticket.session.movie.title}, assento ${ticket.seat.label}`}
+                    >
                       Abrir ingresso
                     </button>
                   </div>

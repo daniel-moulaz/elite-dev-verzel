@@ -113,9 +113,10 @@ export function SharedTicket({ token, onBack }: SharedTicketProps) {
 
   return (
     <div className="public-content shared-ticket-page">
-      <p className="shared-ticket-privacy">
-        Link público sem dados pessoais do comprador.
-      </p>
+      <div className="shared-ticket-privacy" role="note">
+        <strong>Ingresso compartilhado</strong>
+        <span>Link público sem nome, e-mail ou dados do comprador.</span>
+      </div>
       <DigitalTicket
         shared
         ticket={{

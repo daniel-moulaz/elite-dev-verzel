@@ -17,6 +17,7 @@ import {
   tmdbPosterUrl,
   toDateTimeLocalValue,
 } from './formatters'
+import { PosterImage } from '../common/PosterImage'
 import { MoviePicker } from './MoviePicker'
 
 interface SessionEditorProps {
@@ -167,6 +168,54 @@ function validateForm(
   }
 }
 
+interface RoomLayoutPreviewProps {
+  rows: number
+  seatsPerRow: number
+}
+
+function RoomLayoutPreview({ rows, seatsPerRow }: RoomLayoutPreviewProps) {
+  const isValid =
+    Number.isInteger(rows) &&
+    rows >= 1 &&
+    rows <= 10 &&
+    Number.isInteger(seatsPerRow) &&
+    seatsPerRow >= 1 &&
+    seatsPerRow <= 20
+
+  if (!isValid) {
+    return (
+      <div className="room-layout-preview room-layout-invalid">
+        Informe um layout válido para visualizar a sala.
+      </div>
+    )
+  }
+
+  return (
+    <div
+      className="room-layout-preview"
+      role="img"
+      aria-label={`Prévia da sala com ${rows} fileiras e ${seatsPerRow} assentos por fileira`}
+    >
+      <div className="room-preview-screen" aria-hidden="true">Tela</div>
+      <div className="room-preview-scroll" aria-hidden="true">
+        {Array.from({ length: rows }, (_, rowIndex) => (
+          <div className="room-preview-row" key={rowIndex}>
+            <span>{String.fromCharCode(65 + rowIndex)}</span>
+            <div
+              className="room-preview-seats"
+              style={{ gridTemplateColumns: `repeat(${seatsPerRow}, 0.65rem)` }}
+            >
+              {Array.from({ length: seatsPerRow }, (_, seatIndex) => (
+                <i key={seatIndex} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 interface PublishedSessionProps {
   session: OrganizerSession
 }
@@ -177,13 +226,11 @@ function PublishedSession({ session }: PublishedSessionProps) {
   return (
     <article className="published-session">
       <div className="published-movie">
-        {posterUrl ? (
-          <img src={posterUrl} alt={`Pôster de ${session.movie.title}`} />
-        ) : (
-          <div className="poster-placeholder" aria-hidden="true">
-            Sem pôster
-          </div>
-        )}
+        <PosterImage
+          src={posterUrl}
+          title={session.movie.title}
+          className="published-movie-poster"
+        />
         <div>
           <span className="status-badge status-published">Publicada</span>
           <h2>{session.movie.title}</h2>
@@ -228,8 +275,11 @@ function PublishedSession({ session }: PublishedSessionProps) {
       </dl>
 
       <p className="locked-notice">
-        Esta sessão está publicada. Filme, horário, local, preço e assentos não
-        podem mais ser alterados no MVP.
+        <span aria-hidden="true">●</span>
+        <span>
+          <strong>Estrutura bloqueada após publicação.</strong>
+          Filme, horário, local, preço e assentos não podem mais ser alterados.
+        </span>
       </p>
     </article>
   )
@@ -375,7 +425,11 @@ export function SessionEditor({
 
   if (isLoading) {
     return (
-      <section className="organizer-content content-state" aria-live="polite">
+      <section
+        className="organizer-content content-state"
+        aria-busy="true"
+        aria-live="polite"
+      >
         <p className="section-kicker">Carregando</p>
         <h1>Abrindo a sessão…</h1>
       </section>
@@ -515,7 +569,7 @@ export function SessionEditor({
                     updateField('venueName', event.target.value)
                   }
                   maxLength={120}
-                  placeholder="Ex.: Cine Central"
+                  placeholder="Ex.: SEPTEM Paulista"
                   required
                 />
               </div>
@@ -573,42 +627,45 @@ export function SessionEditor({
                 Os lugares serão gerados de A1 em diante. O layout poderá ser
                 alterado somente enquanto a sessão for rascunho.
               </p>
-              <div className="layout-fields">
-                <div className="field">
-                  <label htmlFor="rows">Fileiras</label>
-                  <input
-                    id="rows"
-                    type="number"
-                    value={form.rows}
-                    disabled={isBusy}
-                    min="1"
-                    max="10"
-                    onChange={(event) =>
-                      updateField('rows', event.target.value)
-                    }
-                    required
-                  />
+              <div className="layout-configurator">
+                <div className="layout-fields">
+                  <div className="field">
+                    <label htmlFor="rows">Fileiras</label>
+                    <input
+                      id="rows"
+                      type="number"
+                      value={form.rows}
+                      disabled={isBusy}
+                      min="1"
+                      max="10"
+                      onChange={(event) =>
+                        updateField('rows', event.target.value)
+                      }
+                      required
+                    />
+                  </div>
+                  <span aria-hidden="true">×</span>
+                  <div className="field">
+                    <label htmlFor="seats-per-row">Assentos por fileira</label>
+                    <input
+                      id="seats-per-row"
+                      type="number"
+                      value={form.seatsPerRow}
+                      disabled={isBusy}
+                      min="1"
+                      max="20"
+                      onChange={(event) =>
+                        updateField('seatsPerRow', event.target.value)
+                      }
+                      required
+                    />
+                  </div>
+                  <div className="capacity-summary" aria-live="polite">
+                    <strong>{capacity}</strong>
+                    <span>lugares</span>
+                  </div>
                 </div>
-                <span aria-hidden="true">×</span>
-                <div className="field">
-                  <label htmlFor="seats-per-row">Assentos por fileira</label>
-                  <input
-                    id="seats-per-row"
-                    type="number"
-                    value={form.seatsPerRow}
-                    disabled={isBusy}
-                    min="1"
-                    max="20"
-                    onChange={(event) =>
-                      updateField('seatsPerRow', event.target.value)
-                    }
-                    required
-                  />
-                </div>
-                <div className="capacity-summary" aria-live="polite">
-                  <strong>{capacity}</strong>
-                  <span>lugares</span>
-                </div>
+                <RoomLayoutPreview rows={rows} seatsPerRow={seatsPerRow} />
               </div>
             </fieldset>
 

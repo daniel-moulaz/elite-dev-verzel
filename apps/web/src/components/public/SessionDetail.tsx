@@ -10,12 +10,14 @@ import {
   type SessionSeat,
 } from '../../api'
 import {
+  formatSessionDay,
   formatPrice,
-  formatSessionDate,
+  formatSessionTime,
   movieYear,
   tmdbBackdropUrl,
   tmdbPosterUrl,
 } from '../organizer/formatters'
+import { PosterImage } from '../common/PosterImage'
 
 const maximumSeatsPerReservation = 6
 
@@ -64,6 +66,7 @@ export function SessionDetail({
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
+  const [failedBackdrop, setFailedBackdrop] = useState<string | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -141,8 +144,11 @@ export function SessionDetail({
     setReloadKey((value) => value + 1)
   }
 
-  async function refreshAvailability() {
+  async function refreshAvailability(clearCurrentMessage = true) {
     setIsRefreshing(true)
+    if (clearCurrentMessage) {
+      setMessage(null)
+    }
 
     try {
       const refreshedSeats = await getSessionSeats(sessionId)
@@ -210,7 +216,7 @@ export function SessionDetail({
         setMessage(
           'Um ou mais lugares acabaram de ficar indisponíveis. Atualizamos o mapa para você escolher novamente.',
         )
-        await refreshAvailability()
+        await refreshAvailability(false)
       } else {
         setMessage(
           error instanceof ApiError
@@ -264,59 +270,61 @@ export function SessionDetail({
       </button>
 
       <article className="public-session-hero">
-        {backdropUrl ? (
+        {backdropUrl && failedBackdrop !== backdropUrl ? (
           <img
             className="session-backdrop"
             src={backdropUrl}
             alt=""
             aria-hidden="true"
+            onError={() => setFailedBackdrop(backdropUrl)}
           />
         ) : null}
         <div className="session-hero-content">
-          {posterUrl ? (
-            <img
-              className="detail-poster"
-              src={posterUrl}
-              alt={`Pôster de ${session.movie.title}`}
-            />
-          ) : (
-            <div className="detail-poster poster-placeholder" aria-hidden="true">
-              Pôster indisponível
-            </div>
-          )}
-          <div>
-            <p className="section-kicker">{movieYear(session.movie.releaseDate)}</p>
+          <PosterImage
+            className="detail-poster"
+            src={posterUrl}
+            title={session.movie.title}
+            loading="eager"
+          />
+          <div className="session-title-block">
+            <p className="section-kicker">Em cartaz</p>
             <h1>{session.movie.title}</h1>
-            <p className="movie-overview">
-              {session.movie.overview || 'Sinopse não informada.'}
-            </p>
-            <dl className="detail-facts">
-              <div>
-                <dt>Quando</dt>
-                <dd>{formatSessionDate(session.startsAt)}</dd>
-              </div>
-              <div>
-                <dt>Onde</dt>
-                <dd>
-                  {session.venueName}, {session.roomName}
-                </dd>
-              </div>
-              <div>
-                <dt>Endereço</dt>
-                <dd>{session.address}</dd>
-              </div>
-              <div>
-                <dt>Ingresso</dt>
-                <dd>{formatPrice(session.priceCents)}</dd>
-              </div>
+            <p className="detail-movie-meta">
+              <span>{movieYear(session.movie.releaseDate)}</span>
               {session.movie.runtimeMinutes ? (
-                <div>
-                  <dt>Duração</dt>
-                  <dd>{session.movie.runtimeMinutes} min</dd>
-                </div>
+                <span>{session.movie.runtimeMinutes} min</span>
               ) : null}
-            </dl>
+            </p>
           </div>
+          <dl className="detail-facts">
+            <div className="detail-showtime">
+              <dt>Sessão</dt>
+              <dd>
+                <time dateTime={session.startsAt}>
+                  <strong>{formatSessionTime(session.startsAt)}</strong>
+                  <span>{formatSessionDay(session.startsAt)}</span>
+                </time>
+              </dd>
+            </div>
+            <div className="detail-cinema">
+              <dt>Cinema</dt>
+              <dd>
+                <strong>{session.venueName}</strong>
+                <span>{session.roomName}</span>
+              </dd>
+            </div>
+            <div className="detail-address">
+              <dt>Endereço</dt>
+              <dd>{session.address}</dd>
+            </div>
+            <div className="detail-price">
+              <dt>Ingresso</dt>
+              <dd>{formatPrice(session.priceCents)}</dd>
+            </div>
+          </dl>
+          <p className="movie-overview">
+            {session.movie.overview || 'Sinopse não informada.'}
+          </p>
         </div>
       </article>
 
@@ -340,90 +348,112 @@ export function SessionDetail({
           </button>
         </div>
 
-        <div className="screen-indicator" aria-label="Tela do cinema">
-          TELA
-        </div>
+        <div className="seat-workspace">
+          <div className="seat-map-panel">
+            <div className="screen-indicator" aria-label="Tela do cinema">
+              <span>TELA</span>
+            </div>
+            <p className="seat-scroll-hint" aria-hidden="true">
+              Deslize para os lados para ver toda a fileira.
+            </p>
 
-        <div
-          className="seat-map"
-          role="group"
-          aria-labelledby="seat-map-heading"
-        >
-          {rows.map(([rowLabel, rowSeats]) => (
-            <div className="seat-row" key={rowLabel}>
-              <span className="row-label" aria-hidden="true">
-                {rowLabel}
-              </span>
-              <div className="seat-buttons">
-                {rowSeats.map((seat) => {
-                  const isSelected = selectedSeatIds.has(seat.id)
-                  const isAvailable = seat.status === 'AVAILABLE'
-                  const stateLabel = isSelected
-                    ? 'selecionado'
-                    : isAvailable
-                      ? 'disponível'
-                      : seat.status === 'SOLD'
-                        ? 'vendido'
-                        : 'indisponível'
+            <div
+              className="seat-map-scroll"
+              role="region"
+              aria-label="Mapa de assentos; role horizontalmente em salas maiores"
+              tabIndex={0}
+            >
+              <div
+                className="seat-map"
+                role="group"
+                aria-labelledby="seat-map-heading"
+              >
+                {rows.map(([rowLabel, rowSeats]) => (
+                  <div className="seat-row" key={rowLabel}>
+                    <span className="row-label" aria-hidden="true">
+                      {rowLabel}
+                    </span>
+                    <div className="seat-buttons">
+                      {rowSeats.map((seat) => {
+                        const isSelected = selectedSeatIds.has(seat.id)
+                        const isAvailable = seat.status === 'AVAILABLE'
+                        const stateLabel = isSelected
+                          ? 'selecionado'
+                          : isAvailable
+                            ? 'disponível'
+                            : seat.status === 'SOLD'
+                              ? 'vendido'
+                              : 'indisponível'
 
-                  return (
-                    <button
-                      type="button"
-                      className={`seat-button ${isSelected ? 'seat-selected' : ''} ${isAvailable ? 'seat-available' : 'seat-unavailable'}`}
-                      key={seat.id}
-                      onClick={() => toggleSeat(seat)}
-                      disabled={!isAvailable}
-                      aria-label={`Assento ${seat.label}, ${stateLabel}`}
-                      aria-pressed={isAvailable ? isSelected : undefined}
-                    >
-                      <span aria-hidden="true">
-                        {isSelected ? '✓' : isAvailable ? '○' : '×'}
-                      </span>
-                      <span>{seat.label}</span>
-                    </button>
-                  )
-                })}
+                        return (
+                          <button
+                            type="button"
+                            className={`seat-button ${isSelected ? 'seat-selected' : ''} ${isAvailable ? 'seat-available' : 'seat-unavailable'}`}
+                            key={seat.id}
+                            onClick={() => toggleSeat(seat)}
+                            disabled={!isAvailable}
+                            aria-label={`Assento ${seat.label}, ${stateLabel}`}
+                            aria-pressed={isAvailable ? isSelected : undefined}
+                          >
+                            <span className="seat-shape" aria-hidden="true">
+                              {isSelected ? '✓' : isAvailable ? '' : '×'}
+                            </span>
+                            <span>{seat.label}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <span className="row-label row-label-end" aria-hidden="true">
+                      {rowLabel}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
-          ))}
-        </div>
 
-        <ul className="seat-legend" aria-label="Legenda do mapa">
-          <li><span className="legend-symbol available-symbol">○</span> Disponível</li>
-          <li><span className="legend-symbol selected-symbol">✓</span> Selecionado</li>
-          <li><span className="legend-symbol unavailable-symbol">×</span> Indisponível</li>
-        </ul>
-
-        {message ? (
-          <p className="message error-message" role="alert">
-            {message}
-          </p>
-        ) : null}
-
-        <div className="selection-summary" aria-live="polite">
-          <div>
-            <span>Lugares selecionados</span>
-            <strong>
-              {selectedSeats.length > 0
-                ? selectedSeats.map((seat) => seat.label).join(', ')
-                : 'Nenhum'}
-            </strong>
+            <ul className="seat-legend" aria-label="Legenda do mapa">
+              <li><span className="legend-seat available-symbol" aria-hidden="true" /> Disponível</li>
+              <li><span className="legend-seat selected-symbol" aria-hidden="true">✓</span> Selecionado</li>
+              <li><span className="legend-seat unavailable-symbol" aria-hidden="true">×</span> Indisponível</li>
+            </ul>
           </div>
-          <div>
-            <span>Total estimado</span>
-            <strong>{formatPrice(estimatedTotal)}</strong>
-          </div>
-          <button
-            type="button"
-            onClick={() => void handleReservation()}
-            disabled={selectedSeatIds.size === 0 || isSubmitting}
+
+          <aside
+            className="selection-summary"
+            aria-label="Resumo da seleção"
           >
-            {isSubmitting ? 'Reservando…' : 'Reservar lugares'}
-          </button>
+            <p className="section-kicker">Sua seleção</p>
+            <div>
+              <span>Assentos</span>
+              <strong aria-live="polite" aria-atomic="true">
+                {selectedSeats.length > 0
+                  ? selectedSeats.map((seat) => seat.label).join(', ')
+                  : 'Nenhum selecionado'}
+              </strong>
+            </div>
+            <div className="selection-total">
+              <span>Total</span>
+              <strong>{formatPrice(estimatedTotal)}</strong>
+            </div>
+
+            {message ? (
+              <p className="message error-message" role="alert">
+                {message}
+              </p>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => void handleReservation()}
+              disabled={selectedSeatIds.size === 0 || isSubmitting}
+            >
+              {isSubmitting ? 'Reservando…' : 'Reservar por 10 minutos'}
+            </button>
+            <p className="backend-authority-note">
+              Disponibilidade e valor final confirmados pelo servidor.
+            </p>
+          </aside>
         </div>
-        <p className="backend-authority-note">
-          A disponibilidade e o valor final serão confirmados pelo servidor.
-        </p>
       </section>
     </div>
   )

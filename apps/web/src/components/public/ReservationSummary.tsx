@@ -8,9 +8,11 @@ import {
 } from '../../api'
 import {
   formatPrice,
-  formatSessionDate,
+  formatSessionDay,
+  formatSessionTime,
   tmdbPosterUrl,
 } from '../organizer/formatters'
+import { PosterImage } from '../common/PosterImage'
 
 interface ReservationSummaryProps {
   reservationId: string
@@ -221,16 +223,15 @@ export function ReservationSummary({
       </button>
 
       <article
-        className={`reservation-ticket ${isExpired || isCancelled ? 'reservation-expired' : ''} ${isPaid ? 'reservation-paid' : ''}`}
+        className={`reservation-ticket ${isExpired ? 'reservation-expired' : ''} ${isCancelled ? 'reservation-cancelled' : ''} ${isPaid ? 'reservation-paid' : ''}`}
       >
         <div className="reservation-ticket-main">
-          {posterUrl ? (
-            <img src={posterUrl} alt={`Pôster de ${reservation.session.movie.title}`} />
-          ) : (
-            <div className="poster-placeholder" aria-hidden="true">
-              Pôster indisponível
-            </div>
-          )}
+          <PosterImage
+            className="reservation-poster"
+            src={posterUrl}
+            title={reservation.session.movie.title}
+            loading="eager"
+          />
 
           <div>
             <p className="section-kicker">
@@ -255,8 +256,12 @@ export function ReservationSummary({
 
             <dl className="reservation-facts">
               <div>
-                <dt>Sessão</dt>
-                <dd>{formatSessionDate(reservation.session.startsAt)}</dd>
+                <dt>Data</dt>
+                <dd>{formatSessionDay(reservation.session.startsAt)}</dd>
+              </div>
+              <div>
+                <dt>Horário</dt>
+                <dd>{formatSessionTime(reservation.session.startsAt)}</dd>
               </div>
               <div>
                 <dt>Local</dt>
@@ -280,7 +285,14 @@ export function ReservationSummary({
           </div>
         </div>
 
-        <aside className="reservation-timer">
+        <aside
+          className="reservation-timer"
+          role={isPending && !isLocallyExpired ? 'timer' : 'status'}
+          aria-live={isPending && !isLocallyExpired ? 'off' : 'polite'}
+        >
+          <span className="reservation-status-icon" aria-hidden="true">
+            {isExpired ? '⌛' : isPaid ? '✓' : isCancelled ? '×' : '◷'}
+          </span>
           <span>{isPending && !isLocallyExpired ? 'Tempo restante' : 'Status'}</span>
           <strong>
             {isExpired
@@ -330,11 +342,11 @@ export function ReservationSummary({
       ) : (
         <section className="payment-simulator" aria-labelledby="payment-heading">
           <div>
-            <p className="section-kicker">Checkout demonstrativo</p>
-            <h2 id="payment-heading">Simular pagamento</h2>
+            <p className="section-kicker">Bilheteria · demonstração</p>
+            <h2 id="payment-heading">Escolha o resultado do pagamento</h2>
             <p>
-              Não há cobrança real nem dados de cartão. Selecione um resultado
-              para testar o fluxo ponta a ponta.
+              Pagamento totalmente simulado: nenhum cartão é solicitado e
+              nenhuma cobrança real será feita.
             </p>
           </div>
           <div className="payment-buttons">
@@ -345,7 +357,7 @@ export function ReservationSummary({
             >
               {paymentAction === 'APPROVED'
                 ? 'Aprovando…'
-                : 'Simular pagamento aprovado'}
+                : 'Aprovar pagamento'}
             </button>
             <button
               type="button"
@@ -355,7 +367,7 @@ export function ReservationSummary({
             >
               {paymentAction === 'DECLINED'
                 ? 'Recusando…'
-                : 'Simular pagamento recusado'}
+                : 'Recusar pagamento'}
             </button>
           </div>
         </section>

@@ -4,6 +4,8 @@ import {
   formatSessionDate,
   tmdbPosterUrl,
 } from '../organizer/formatters'
+import { BrandLockup } from '../common/BrandLockup'
+import { PosterImage } from '../common/PosterImage'
 
 const QRCodeSVG = lazy(() =>
   import('qrcode.react').then((module) => ({ default: module.QRCodeSVG })),
@@ -41,17 +43,16 @@ export function DigitalTicket({ ticket, shared = false }: DigitalTicketProps) {
       aria-label={`Ingresso para ${ticket.session.movie.title}, assento ${ticket.seatLabel}`}
     >
       <div className="digital-ticket-details">
+        <div className="ticket-branding">
+          <BrandLockup />
+          <span>{shared ? 'Ingresso compartilhado' : 'Ingresso digital'}</span>
+        </div>
         <div className="ticket-movie">
-          {posterUrl ? (
-            <img
-              src={posterUrl}
-              alt={`Pôster de ${ticket.session.movie.title}`}
-            />
-          ) : (
-            <div className="ticket-poster-placeholder" aria-hidden="true">
-              E
-            </div>
-          )}
+          <PosterImage
+            src={posterUrl}
+            title={ticket.session.movie.title}
+            className="ticket-poster"
+          />
           <div>
             <p className="section-kicker">
               {shared ? 'Ingresso compartilhado' : 'Seu ingresso digital'}
@@ -90,6 +91,7 @@ export function DigitalTicket({ ticket, shared = false }: DigitalTicketProps) {
       </div>
 
       <div className="ticket-admission">
+        <span className="ticket-admission-label">Apresente na portaria</span>
         <div
           className="ticket-qr"
           role="img"
@@ -101,13 +103,14 @@ export function DigitalTicket({ ticket, shared = false }: DigitalTicketProps) {
               size={256}
               level="M"
               marginSize={4}
-              bgColor="#fffdf7"
-              fgColor="#141210"
+              bgColor="#ffffff"
+              fgColor="#111111"
               title={`Ingresso ${ticket.seatLabel}`}
             />
           </Suspense>
         </div>
         <p>Apresente o QR Code ou informe o código manual na portaria.</p>
+        <span className="manual-code-label">Código manual</span>
         <strong className="manual-code" aria-label={`Código manual ${ticket.manualCode}`}>
           {ticket.manualCode}
         </strong>
