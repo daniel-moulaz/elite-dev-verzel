@@ -29,7 +29,10 @@ const envSchema = z
     },
   )
 
-const parsedEnv = envSchema.safeParse(process.env)
+const parsedEnv = envSchema.safeParse({
+  ...process.env,
+  API_PORT: process.env.PORT ?? process.env.API_PORT,
+})
 
 if (!parsedEnv.success) {
   throw new Error(`Variáveis de ambiente inválidas:\n${z.prettifyError(parsedEnv.error)}`)

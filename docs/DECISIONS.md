@@ -158,6 +158,8 @@ O deploy é opcional no enunciado, mas reduz a fricção de avaliação e demons
 
 Considerar a entrega pronta somente após publicar e executar smoke test do frontend, API e PostgreSQL. O alvo inicial é Vercel para web e Railway para API/banco; execução local documentada permanece como fallback.
 
+A preparação usa configuração versionada mínima: rewrite da SPA no projeto Vercel e Railpack no Railway com build exclusivo da API, migrations em pre-deploy, start do workspace e healthcheck. O seed demonstrativo não faz parte do ciclo automático e deve ser executado uma vez após as migrations.
+
 ### Alternativas consideradas
 
 Somente ambiente local, Render ou concentrar todos os serviços em uma plataforma.
