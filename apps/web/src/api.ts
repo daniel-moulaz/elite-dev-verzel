@@ -189,6 +189,35 @@ export interface ShareLinkResult {
   expiresAt: string
 }
 
+export interface GateSession {
+  id: string
+  startsAt: string
+  venueName: string
+  roomName: string
+  movie: {
+    title: string
+    posterPath: string | null
+  }
+}
+
+export type GateConsumeResult =
+  | { result: 'INVALID' | 'WRONG_EVENT' }
+  | { result: 'ALREADY_USED'; usedAt: string | null }
+  | {
+      result: 'VALID'
+      usedAt: string
+      ticket: {
+        seat: { label: string }
+        session: {
+          id: string
+          startsAt: string
+          venueName: string
+          roomName: string
+          movie: { title: string }
+        }
+      }
+    }
+
 interface LoginResponse {
   accessToken: string
   user: AuthenticatedUser
@@ -213,6 +242,10 @@ interface SeatsResponse {
 
 interface TicketsResponse {
   tickets: TicketSummary[]
+}
+
+interface GateSessionsResponse {
+  sessions: GateSession[]
 }
 
 interface ErrorResponse {
@@ -549,5 +582,33 @@ export function getSharedTicket(
   return publicRequest<SharedTicket>(
     `/shared/${encodeURIComponent(token)}`,
     signal,
+  )
+}
+
+export async function getGateSessions(
+  accessToken: string,
+  signal?: AbortSignal,
+): Promise<GateSession[]> {
+  const response = await authenticatedRequest<GateSessionsResponse>(
+    '/gate/sessions',
+    accessToken,
+    { signal: signal ?? null },
+  )
+
+  return response.sessions
+}
+
+export function consumeGateTicket(
+  accessToken: string,
+  sessionId: string,
+  credential: string,
+): Promise<GateConsumeResult> {
+  return authenticatedRequest<GateConsumeResult>(
+    '/gate/tickets/consume',
+    accessToken,
+    {
+      method: 'POST',
+      body: JSON.stringify({ sessionId, credential }),
+    },
   )
 }

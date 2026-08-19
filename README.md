@@ -1,6 +1,6 @@
 # Elite Dev Verzel
 
-Plataforma de sessões de cinema do desafio Full Stack da Verzel. Até o M4, o fluxo cobre publicação pelo organizador, escolha e hold de assentos, pagamento simulado, emissão de ingresso com QR assinado e compartilhamento seguro.
+Plataforma de sessões de cinema do desafio Full Stack da Verzel. Até o M5, o fluxo cobre publicação pelo organizador, escolha e hold de assentos, pagamento simulado, emissão de ingresso com QR assinado, compartilhamento seguro e consumo atômico pela portaria.
 
 ## Requisitos
 
@@ -67,7 +67,7 @@ Invoke-RestMethod -Uri "http://localhost:3333/auth/me" -Headers @{ Authorization
 
 O frontend armazena somente o access token em `sessionStorage` e confirma tokens existentes em `GET /auth/me`. Organizadores pesquisam filmes, preparam rascunhos e publicam sessões. A programação publicada é pública; clientes autenticados escolhem até seis assentos, criam um hold de 10 minutos e simulam aprovação ou recusa sem informar cartão.
 
-## Fluxo de demonstração do M4
+## Fluxo de demonstração do ingresso
 
 1. Entre como `customer1@demo.local` e escolha uma sessão/assentos.
 2. No resumo da reserva, selecione **Simular pagamento aprovado** para emitir um ingresso ou **Simular pagamento recusado** para liberar os lugares.
@@ -75,6 +75,24 @@ O frontend armazena somente o access token em `sessionStorage` e confirma tokens
 4. Em um ingresso, gere, copie, rotacione ou revogue `/shared/:token`; a página pública não mostra dados pessoais.
 
 O QR carrega um JWS HS256 com claims mínimos. O token é gerado sob demanda e confirmado no banco em uma etapa posterior da portaria. O link público usa token aleatório de 32 bytes; apenas seu SHA-256 é persistido.
+
+## Portaria: câmera, código manual e quatro resultados
+
+O seed prepara um ingresso `VALID` de **Matrix**, assento A1, para `customer2@demo.local`, além da sessão de **Interestelar** necessária para demonstrar evento errado. Para repetir a demonstração desde o início, execute `npm run db:seed`; o seed restaura o ingresso demo para `VALID` sem trocar seu código manual.
+
+1. Em uma janela ou dispositivo, entre como `customer2@demo.local`, abra **Meus ingressos** e mantenha o ingresso de Matrix visível. O QR e o código `XXXX-XXXX-XXXX-XXXX` são credenciais alternativas do mesmo ingresso.
+2. Em outra janela, perfil ou dispositivo, entre como `gate@demo.local` e selecione uma sessão publicada.
+3. Autorize a câmera, aponte para o QR inteiro dentro da marcação ou digite o código manual e pressione **Validar ingresso**.
+4. Após cada resposta, use **Validar próximo ingresso** para limpar a leitura e reabrir a câmera.
+
+Roteiro dos resultados:
+
+- selecione **Interestelar** e apresente o ingresso de Matrix: `WRONG_EVENT`; o ingresso não é alterado;
+- troque para **Matrix** e apresente o mesmo ingresso: `VALID`; o backend o move para `USED` com horário do PostgreSQL e o GATE autenticado;
+- apresente novamente em Matrix: `ALREADY_USED`;
+- digite uma credencial deliberadamente malformada, como `INVALIDO`: `INVALID`, sem revelar detalhes criptográficos.
+
+A câmera usa `getUserMedia`: em produção ela requer HTTPS e permissão do navegador; `localhost` é aceito como contexto seguro para desenvolvimento. Um celular acessando `http://<IP-da-rede>` normalmente não receberá acesso à câmera, então use o deploy HTTPS para o teste físico. Permissão negada, câmera ausente ou ocupada não bloqueiam a alternativa manual.
 
 Para parar o PostgreSQL sem remover os dados:
 
@@ -113,7 +131,9 @@ npm run check
 - `POST /me/tickets/:id/share-link` — cria ou substitui o link compartilhável;
 - `DELETE /me/tickets/:id/share-link` — revoga o link ativo;
 - `GET /shared/:token` — mostra o ingresso sem PII e sem cache.
+- `GET /gate/sessions` — lista sessões `PUBLISHED` para o GATE selecionar;
+- `POST /gate/tickets/consume` — valida QR/código e consome o ingresso atomicamente.
 
 As rotas de catálogo TMDb e `/organizer/*` exigem JWT de `ORGANIZER`; criar e consultar reserva exige `CUSTOMER`. O catálogo externo usa `pt-BR` e região `BR`; sessões já criadas usam o snapshot persistido e não dependem da TMDb para leitura.
 
-O PostgreSQL arbitra disputas e pagamentos com locks ordenados e `UNIQUE(ReservationSeat.seatId)`. Aprovação preserva a alocação; recusa e expiração a removem na mesma transação. Sessões publicadas permanecem estruturalmente imutáveis. A portaria, o consumo do ingresso e a câmera ainda não fazem parte do M4.
+O PostgreSQL arbitra disputas e pagamentos com locks ordenados e `UNIQUE(ReservationSeat.seatId)`. Aprovação preserva a alocação; recusa e expiração a removem na mesma transação. Sessões publicadas permanecem estruturalmente imutáveis. Na portaria, um `UPDATE` condicionado a `status = 'VALID'` garante um único `VALID` mesmo quando dois dispositivos apresentam o ingresso ao mesmo tempo.

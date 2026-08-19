@@ -10,6 +10,7 @@ import {
 } from './modules/catalog/index.js'
 import { registerPublicSessions } from './modules/public-sessions/register-public-sessions.js'
 import { registerPayments } from './modules/payments/index.js'
+import { registerGate } from './modules/gate/index.js'
 import { registerReservations } from './modules/reservations/index.js'
 import { registerSharedTickets } from './modules/shared-tickets/index.js'
 import { registerSessions } from './modules/sessions/register-sessions.js'
@@ -46,6 +47,7 @@ export function buildApp(
   registerReservations(app)
   registerPayments(app)
   registerTickets(app, { signingSecret: env.TICKET_SIGNING_SECRET })
+  registerGate(app, { signingSecret: env.TICKET_SIGNING_SECRET })
   registerSharedTickets(app, {
     signingSecret: env.TICKET_SIGNING_SECRET,
     webOrigin: env.WEB_ORIGIN,

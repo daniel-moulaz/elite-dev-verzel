@@ -3,7 +3,11 @@ import { env } from './config/env.js'
 
 const app = buildApp({
   logger: {
-    redact: ['req.headers.authorization', 'req.body.password'],
+    redact: [
+      'req.headers.authorization',
+      'req.body.password',
+      'req.body.credential',
+    ],
   },
 })
 

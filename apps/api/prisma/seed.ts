@@ -225,7 +225,11 @@ async function seed() {
           status: TicketStatus.VALID,
           manualCode: generateManualCode(),
         },
-        update: {},
+        update: {
+          status: TicketStatus.VALID,
+          usedAt: null,
+          usedByGateId: null,
+        },
       })
     })
 

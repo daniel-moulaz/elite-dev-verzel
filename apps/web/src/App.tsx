@@ -12,6 +12,7 @@ import {
   type AuthenticatedUser,
   type Reservation,
 } from './api'
+import { GateArea } from './components/gate/GateArea'
 import { OrganizerArea } from './components/organizer/OrganizerArea'
 import { PublicCatalog } from './components/public/PublicCatalog'
 import { PublicHeader } from './components/public/PublicHeader'
@@ -178,40 +179,6 @@ function LoginScreen({
             {isSubmitting ? 'Entrando…' : 'Entrar'}
           </button>
         </form>
-      </section>
-    </main>
-  )
-}
-
-interface GateAreaProps {
-  user: AuthenticatedUser
-  onLogout: () => void
-}
-
-function GateArea({ user, onLogout }: GateAreaProps) {
-  return (
-    <main className="app-shell">
-      <section className="auth-panel role-panel">
-        <p className="eyebrow">Portaria</p>
-        <h1>Área temporária da portaria</h1>
-        <p>Seu acesso GATE foi confirmado pela API.</p>
-        <dl className="identity-list">
-          <div>
-            <dt>Nome</dt>
-            <dd>{user.name}</dd>
-          </div>
-          <div>
-            <dt>E-mail</dt>
-            <dd>{user.email}</dd>
-          </div>
-          <div>
-            <dt>Papel</dt>
-            <dd>{user.role}</dd>
-          </div>
-        </dl>
-        <button type="button" className="secondary-button" onClick={onLogout}>
-          Sair
-        </button>
       </section>
     </main>
   )
@@ -390,7 +357,13 @@ export function App() {
     }
 
     if (authState.user.role === 'GATE') {
-      return <GateArea user={authState.user} onLogout={handleLogout} />
+      return (
+        <GateArea
+          accessToken={authState.accessToken}
+          user={authState.user}
+          onLogout={handleLogout}
+        />
+      )
     }
   }
 

@@ -98,9 +98,9 @@ export function DigitalTicket({ ticket, shared = false }: DigitalTicketProps) {
           <Suspense fallback={<span className="qr-loading">Gerando QR…</span>}>
             <QRCodeSVG
               value={ticket.qrToken}
-              size={224}
+              size={256}
               level="M"
-              marginSize={2}
+              marginSize={4}
               bgColor="#fffdf7"
               fgColor="#141210"
               title={`Ingresso ${ticket.seatLabel}`}

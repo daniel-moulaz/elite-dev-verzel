@@ -102,13 +102,15 @@ Um UUID ou código previsível no QR pode ser fabricado, e uma assinatura válid
 
 Usar JWT/JWS HS256 com dados mínimos, segredo exclusivo em variável de ambiente, algoritmo fixado, emissor e audiência. Após validar a assinatura, consultar ticket, sessão e status no banco. Consumir com update condicional atômico.
 
+A sessão escolhida pela portaria é a autoridade operacional. A precedência é `INVALID`, `WRONG_EVENT`, `ALREADY_USED` e, por fim, a tentativa de consumo `VALID`. Portanto, mesmo um ingresso já utilizado retorna `WRONG_EVENT` quando pertence a outra sessão, sem revelar seu estado de uso fora do contexto selecionado.
+
 ### Alternativas consideradas
 
 ID puro, token próprio com HMAC e assinatura assimétrica.
 
 ### Trade-offs
 
-HS256 é conhecido, pequeno e adequado a um único backend. Exige proteção e rotação operacional do segredo; rotação com múltiplas chaves não entra no MVP. O payload é legível e, por isso, não contém PII.
+HS256 é conhecido, pequeno e adequado a um único backend. Exige proteção e rotação operacional do segredo; rotação com múltiplas chaves não entra no MVP. O payload é legível e, por isso, não contém PII. A precedência reduz informação operacional exposta entre sessões, ao custo de não informar à portaria que o ingresso de outro evento já foi usado.
 
 ## ADR-007 — Compartilhamento por bearer link simples
 

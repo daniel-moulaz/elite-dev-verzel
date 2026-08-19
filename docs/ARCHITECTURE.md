@@ -44,7 +44,7 @@ As rotas validam contrato, identidade, papel e ownership. Serviços coordenam tr
 | `Reservation` | cliente, sessão, status, `expiresAt`, total | índices por cliente, sessão, status e expiração |
 | `ReservationSeat` | reserva e assento | `UNIQUE(seatId)` é o árbitro final; vínculo é removido ao liberar hold |
 | `Payment` | reserva, valor, resultado e timestamps | `UNIQUE(reservationId)`; valor vindo do backend |
-| `Ticket` | sessão, assento reservado, código manual, status e `usedAt` | vínculo e código únicos; índices por sessão e status |
+| `Ticket` | sessão, assento reservado, código manual, status, `usedAt` e GATE responsável | vínculo e código únicos; índices por sessão e status |
 | `SharedTicketLink` | ingresso, `tokenHash`, expiração/revogação | ingresso e hash únicos; token puro nunca é persistido |
 
 O snapshot do filme fica em `Session` (`tmdbId`, título, pôster, sinopse, duração e classificação disponível). Uma tabela separada não agrega valor ao MVP. Datas são armazenadas em UTC e valores monetários em centavos.
@@ -100,11 +100,16 @@ A portaria escolhe a sessão, lê o QR pela câmera ou informa o código manual.
 
 ```sql
 UPDATE "Ticket"
-SET status = 'USED', "usedAt" = now()
+SET
+  status = 'USED',
+  "usedAt" = clock_timestamp(),
+  "usedByGateId" = $3
 WHERE id = $1 AND "sessionId" = $2 AND status = 'VALID';
 ```
 
-Uma linha alterada produz `VALID`. Caso contrário, uma releitura controlada distingue `ALREADY_USED`, `WRONG_EVENT` e `INVALID`. Assim, dois dispositivos concorrentes não obtêm sucesso.
+Uma linha alterada produz `VALID`. A credencial inexistente ou criptograficamente inválida produz `INVALID`; um ticket de outra sessão produz `WRONG_EVENT` antes da inspeção do status; e um ticket já consumido na sessão selecionada produz `ALREADY_USED`. Caso o update retorne zero depois de uma leitura `VALID`, uma releitura controlada identifica o vencedor concorrente. Assim, somente um dos dois dispositivos concorrentes obtém `VALID`; o outro recebe `ALREADY_USED`.
+
+O frontend da portaria usa a câmera do dispositivo e decodificação QR no navegador, carregada somente nessa jornada. O scanner para antes de enviar a credencial, permanece parado durante a resposta e só reinicia após a ação explícita de validar o próximo ingresso. A entrada manual permanece disponível mesmo sem permissão ou câmera. Em produção, `getUserMedia` exige HTTPS.
 
 ### Compartilhamento
 
@@ -141,7 +146,7 @@ Contas são fornecidas por seed no MVP; cadastro e recuperação de senha não s
 | `DELETE /me/tickets/:id/share-link` | owner customer | revogar o link ativo |
 | `GET /shared/:token` | público | abrir ingresso compartilhado sem cache |
 | `GET /gate/sessions` | gate | escolher sessão publicada |
-| `POST /gate/sessions/:id/consume` | gate | validar e consumir QR/código |
+| `POST /gate/tickets/consume` | gate | validar e consumir QR/código no contexto da sessão escolhida |
 
 ## Execução, CI e deploy
 
