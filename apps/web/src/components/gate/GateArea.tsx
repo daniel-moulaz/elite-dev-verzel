@@ -18,6 +18,7 @@ import {
   tmdbPosterUrl,
 } from '../organizer/formatters'
 import { BrandLockup } from '../common/BrandLockup'
+import { OfflineNotice } from '../common/OfflineNotice'
 import { PosterImage } from '../common/PosterImage'
 import { TmdbAttribution } from '../public/TmdbAttribution'
 import { QrScanner } from './QrScanner'
@@ -36,22 +37,22 @@ type SessionsState =
 const resultContent = {
   VALID: {
     icon: '✓',
-    title: 'Entrada liberada',
+    title: 'INGRESSO VÁLIDO',
     description: 'Ingresso válido e consumido agora.',
   },
   INVALID: {
     icon: '×',
-    title: 'Entrada negada',
+    title: 'INGRESSO INVÁLIDO',
     description: 'Ingresso inválido. A credencial não foi reconhecida.',
   },
   ALREADY_USED: {
     icon: '!',
-    title: 'Entrada já registrada',
+    title: 'INGRESSO JÁ UTILIZADO',
     description: 'Este ingresso já havia sido consumido nesta sessão.',
   },
   WRONG_EVENT: {
     icon: '↔',
-    title: 'Sessão incorreta',
+    title: 'OUTRA SESSÃO',
     description: 'O ingresso não pertence à sessão selecionada. Não foi consumido.',
   },
 } as const
@@ -61,6 +62,17 @@ function formatUsedAt(value: string) {
     dateStyle: 'short',
     timeStyle: 'medium',
   }).format(new Date(value))
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  return (
+    target instanceof Element &&
+    Boolean(
+      target.closest(
+        'input, textarea, select, [contenteditable]:not([contenteditable="false"])',
+      ),
+    )
+  )
 }
 
 export function GateArea({ accessToken, user, onLogout }: GateAreaProps) {
@@ -78,14 +90,63 @@ export function GateArea({ accessToken, user, onLogout }: GateAreaProps) {
   const [scannerPaused, setScannerPaused] = useState(false)
   const [scannerKey, setScannerKey] = useState(0)
   const [reloadKey, setReloadKey] = useState(0)
+  const [canUseFullscreen, setCanUseFullscreen] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const validationInFlightRef = useRef(false)
+  const gateShellRef = useRef<HTMLDivElement>(null)
+  const mainRef = useRef<HTMLElement>(null)
+  const focusMainOnNextRenderRef = useRef(false)
   const scannerTitleRef = useRef<HTMLHeadingElement>(null)
+  const manualInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    mainRef.current?.focus({ preventScroll: true })
+  }, [])
 
   useEffect(() => {
     if (selectedSession && !consumeResult) {
       scannerTitleRef.current?.focus()
+      return
+    }
+
+    if (!selectedSession && focusMainOnNextRenderRef.current) {
+      focusMainOnNextRenderRef.current = false
+      mainRef.current?.focus()
     }
   }, [consumeResult, scannerKey, selectedSession])
+
+  useEffect(() => {
+    const shell = gateShellRef.current
+
+    if (!shell) {
+      return
+    }
+
+    const fullscreenSupported =
+      document.fullscreenEnabled &&
+      typeof shell.requestFullscreen === 'function' &&
+      typeof document.exitFullscreen === 'function'
+
+    setCanUseFullscreen(fullscreenSupported)
+
+    if (!fullscreenSupported) {
+      return
+    }
+
+    function handleFullscreenChange() {
+      setIsFullscreen(document.fullscreenElement === shell)
+    }
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange)
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange)
+
+      if (document.fullscreenElement === shell) {
+        void document.exitFullscreen().catch(() => undefined)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -161,6 +222,7 @@ export function GateArea({ accessToken, user, onLogout }: GateAreaProps) {
   }
 
   function changeSession() {
+    focusMainOnNextRenderRef.current = true
     setSelectedSession(null)
     setConsumeResult(null)
     setManualCredential('')
@@ -168,13 +230,37 @@ export function GateArea({ accessToken, user, onLogout }: GateAreaProps) {
     setScannerPaused(true)
   }
 
-  function validateNext() {
+  const validateNext = useCallback(() => {
     setConsumeResult(null)
     setManualCredential('')
     setValidationError('')
     setScannerPaused(false)
     setScannerKey((value) => value + 1)
-  }
+  }, [])
+
+  useEffect(() => {
+    if (!consumeResult || isValidating || isFullscreen) {
+      return
+    }
+
+    function handleResultShortcut(event: KeyboardEvent) {
+      if (
+        event.key !== 'Escape' ||
+        event.defaultPrevented ||
+        event.repeat ||
+        isEditableTarget(event.target) ||
+        document.fullscreenElement
+      ) {
+        return
+      }
+
+      event.preventDefault()
+      validateNext()
+    }
+
+    window.addEventListener('keydown', handleResultShortcut)
+    return () => window.removeEventListener('keydown', handleResultShortcut)
+  }, [consumeResult, isFullscreen, isValidating, validateNext])
 
   function resumeScanner() {
     setValidationError('')
@@ -192,8 +278,38 @@ export function GateArea({ accessToken, user, onLogout }: GateAreaProps) {
     setReloadKey((value) => value + 1)
   }
 
+  function focusManualCode() {
+    manualInputRef.current?.focus()
+    manualInputRef.current?.scrollIntoView({
+      behavior: 'auto',
+      block: 'center',
+    })
+  }
+
+  async function toggleFullscreen() {
+    const shell = gateShellRef.current
+
+    if (!shell || !canUseFullscreen) {
+      return
+    }
+
+    try {
+      if (document.fullscreenElement === shell) {
+        await document.exitFullscreen()
+      } else if (!document.fullscreenElement) {
+        await shell.requestFullscreen()
+      }
+    } catch {
+      // Fullscreen is progressive enhancement; the Gate remains operational.
+    }
+  }
+
   return (
-    <div className="gate-shell">
+    <div
+      ref={gateShellRef}
+      className={`gate-shell${isFullscreen ? ' is-fullscreen' : ''}`}
+    >
+      <OfflineNotice fullscreenOnly />
       <header className="gate-topbar">
         <div className="gate-brand">
           <BrandLockup context="Portaria" />
@@ -201,13 +317,34 @@ export function GateArea({ accessToken, user, onLogout }: GateAreaProps) {
         </div>
         <div className="gate-account">
           <span>{user.name}</span>
-          <button type="button" className="text-button" onClick={onLogout}>
+          {canUseFullscreen ? (
+            <button
+              type="button"
+              className="text-button gate-fullscreen-button"
+              aria-pressed={isFullscreen}
+              onClick={() => void toggleFullscreen()}
+              disabled={isValidating}
+            >
+              {isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="text-button"
+            onClick={onLogout}
+            disabled={isValidating}
+          >
             Sair
           </button>
         </div>
       </header>
 
-      <main className="gate-content">
+      <main
+        id="main-content"
+        ref={mainRef}
+        className="gate-content"
+        tabIndex={-1}
+      >
         {!selectedSession ? (
           <section className="gate-session-step" aria-labelledby="gate-title">
             <div className="gate-heading">
@@ -284,14 +421,27 @@ export function GateArea({ accessToken, user, onLogout }: GateAreaProps) {
                   {selectedSession.venueName} · {selectedSession.roomName}
                 </p>
               </div>
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={changeSession}
-                disabled={isValidating}
-              >
-                Trocar sessão
-              </button>
+              <div className="gate-session-actions">
+                {!consumeResult ? (
+                  <button
+                    type="button"
+                    className="secondary-button gate-manual-shortcut"
+                    aria-controls="manual-code"
+                    onClick={focusManualCode}
+                    disabled={isValidating}
+                  >
+                    Digitar código
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={changeSession}
+                  disabled={isValidating}
+                >
+                  Trocar sessão
+                </button>
+              </div>
             </div>
 
             {consumeResult ? (
@@ -317,7 +467,7 @@ export function GateArea({ accessToken, user, onLogout }: GateAreaProps) {
                 <aside className="manual-validation" aria-labelledby="manual-heading">
                   <p className="section-kicker">Alternativa sempre disponível</p>
                   <h2 id="manual-heading">Digitar código manual</h2>
-                  <p>
+                  <p id="manual-code-help">
                     Use os 16 caracteres exibidos no ingresso. Espaços ou
                     hífens entre os grupos são aceitos.
                   </p>
@@ -326,6 +476,7 @@ export function GateArea({ accessToken, user, onLogout }: GateAreaProps) {
                     <label htmlFor="manual-code">Código do ingresso</label>
                     <input
                       id="manual-code"
+                      ref={manualInputRef}
                       value={manualCredential}
                       onChange={(event) =>
                         setManualCredential(event.target.value.toUpperCase())
@@ -337,6 +488,12 @@ export function GateArea({ accessToken, user, onLogout }: GateAreaProps) {
                       spellCheck={false}
                       maxLength={32}
                       disabled={isValidating}
+                      aria-invalid={Boolean(validationError)}
+                      aria-describedby={
+                        validationError
+                          ? 'manual-code-help manual-code-error'
+                          : 'manual-code-help'
+                      }
                     />
                     <button
                       type="submit"
@@ -348,7 +505,7 @@ export function GateArea({ accessToken, user, onLogout }: GateAreaProps) {
 
                   {validationError ? (
                     <div className="gate-validation-error" role="alert">
-                      <p>{validationError}</p>
+                      <p id="manual-code-error">{validationError}</p>
                       {scannerPaused ? (
                         <button
                           type="button"
@@ -392,24 +549,44 @@ function GateResult({
 }: GateResultProps) {
   const content = resultContent[result.result]
   const resultRef = useRef<HTMLDivElement>(null)
+  const didHandleResultRef = useRef(false)
 
   useEffect(() => {
+    if (didHandleResultRef.current) {
+      return
+    }
+
+    didHandleResultRef.current = true
     resultRef.current?.focus()
-  }, [])
+
+    const prefersReducedMotion =
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+    if (!prefersReducedMotion && typeof navigator.vibrate === 'function') {
+      try {
+        navigator.vibrate(result.result === 'VALID' ? 80 : [60, 45, 60])
+      } catch {
+        // Haptics are optional and must never interrupt Gate operation.
+      }
+    }
+  }, [result.result])
 
   return (
     <div
       ref={resultRef}
       className={`gate-result result-${result.result.toLowerCase()}`}
-      role="status"
-      aria-live="assertive"
+      aria-labelledby="gate-result-title"
+      aria-describedby="gate-result-description"
       tabIndex={-1}
     >
       <span className="gate-result-icon" aria-hidden="true">{content.icon}</span>
       <p className="section-kicker">Resultado da validação</p>
       <span className="gate-result-code">{result.result}</span>
-      <h2>{content.title}</h2>
-      <p className="gate-result-description">{content.description}</p>
+      <h2 id="gate-result-title">{content.title}</h2>
+      <p id="gate-result-description" className="gate-result-description">
+        {content.description}
+      </p>
 
       {result.result === 'VALID' ? (
         <dl className="gate-result-facts">

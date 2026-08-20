@@ -65,9 +65,12 @@ export interface PublicSessionSummary {
   priceCents: number
   capacity: number
   movie: {
+    tmdbId: number
     title: string
     posterPath: string | null
+    backdropPath: string | null
     releaseDate: string | null
+    runtimeMinutes: number | null
   }
 }
 

@@ -238,7 +238,7 @@ Aplicar apenas escala, hover e cantos novos à V2, copiar a composição de uma 
 
 ### Trade-offs
 
-O resumo público não oferece backdrop; por isso a atmosfera reutiliza o pôster com blur e gradientes, sem fetch ou contrato adicional. A superfície clara exige estilos de contraste cuidadosamente escopados, mas mantém backend, dependências e arquitetura da informação intactos.
+Naquela iteração, o resumo público ainda não oferecia backdrop; por isso a atmosfera reutilizava o pôster com blur e gradientes. Essa limitação foi revista de forma aditiva na ADR-017. A superfície clara exige estilos de contraste cuidadosamente escopados, mas mantém dependências e arquitetura da informação intactas.
 
 ## ADR-014 — OpenAPI gerado sem duplicar validação
 
@@ -275,3 +275,51 @@ SQLite, banco mockado, `prisma db push`, banco compartilhado já preparado, cham
 ### Trade-offs
 
 O banco real aumenta a confiança nas migrations e nas regras concorrentes, ao custo de uma execução mais lenta que testes isolados. Um job sequencial reduz duplicação e facilita a avaliação, mas não valida deploy nem disponibilidade da TMDb, que permanecem fora deste bloco.
+
+## ADR-016 — Polimento final como evolução da V3, sem nova stack
+
+### Contexto
+
+A V3 já havia sido aceita como direção visual e o fluxo ponta a ponta estava publicado. A etapa final precisava tornar mais visíveis as qualidades reais do produto — concorrência de assentos, hold, ingresso e operação da portaria — sem reabrir o redesign, inventar dados ou transformar um projeto React júnior em uma vitrine de bibliotecas.
+
+Componentes do 21st.dev foram avaliados apenas como referência. O ticket externo combinava uma boa composição de boarding pass com WebGL e dithering desproporcionais ao problema; o sign-in externo dependia de Next.js, Three, Framer Motion e Tailwind CSS, incompatíveis com a arquitetura e com o orçamento de bundle do projeto.
+
+### Decisão
+
+Manter a linguagem `Cinema Black + SEPTEM Red + Ticket Ivory` e executar uma revisão V3.5 com React, CSS e Web APIs nativas. A inspiração aproveitada do ticket se limita a corpo e canhoto, notches, perfuração e hierarquia editorial, reimplementados no código existente; nenhuma implementação externa foi copiada. A marca recebe símbolo SVG próprio, favicon e lockup, também sem asset gerado externamente.
+
+O mapa consulta a disponibilidade a cada oito segundos somente enquanto a tela está ativa, com cancelamento, pausa em aba oculta e reconciliação da seleção. Isso torna o comportamento quase em tempo real perceptível sem WebSocket, Redis ou mudança no backend. O PostgreSQL e a API continuam autoridades sobre disponibilidade, expiração, pagamento e consumo. Feedback, compartilhamento nativo, fullscreen e háptica são progressivos e não criam dependências obrigatórias.
+
+### Alternativas consideradas
+
+Copiar os componentes estudados, instalar uma biblioteca de UI/animação/carrossel, reescrever em Next.js/Tailwind, usar WebSocket para assentos, redesenhar a V3 ou limitar a etapa a mudanças cosméticas.
+
+### Trade-offs
+
+HTML, CSS e estado local mantêm bundle, stack e explicabilidade sob controle, mas exigem mais cuidado manual com responsividade e acessibilidade. O polling adiciona uma requisição leve durante a seleção e não oferece atualização instantânea; em troca, possui ciclo de vida simples e reaproveita um endpoint idempotente. As melhorias progressivas dependem do suporte do navegador e sempre preservam o fallback funcional.
+
+## ADR-017 — Passada final orientada por programação real e ações nativas
+
+### Contexto
+
+A revisão visual humana da V3.5 aprovou marca, login, mapa, Organizer e Gate, mas identificou três problemas ainda perceptíveis: pôsteres pequenos eram esticados pela altura variável dos cards, o topo da Home não aproveitava o backdrop já persistido e a programação semeada tinha pouca densidade para demonstrar o agrupamento por filme e horário. O ingresso também precisava ocupar menos altura e oferecer utilidades coerentes com um artefato real.
+
+A [Ingresso.com](https://atendimento.ingresso.com/portal/pt-br/kb/articles/como-fa%C3%A7o-para-comprar-meu-ingresso-pelo-site) foi consultada como referência de hierarquia — horário inicia a compra e assentos vêm em seguida — e a [Sympla](https://produtores.sympla.com.br/funcionalidades/check-in-para-eventos/) como referência operacional de leitura móvel. Projetos públicos antigos de candidatos foram observados somente como benchmark de apresentação. Nenhuma dessas fontes substitui o desafio atual ou autoriza copiar interface, código ou escopo.
+
+### Decisão
+
+Padronizar pôsteres em caixas 2:3, com dimensões intrínsecas e `srcset` limitado aos tamanhos da TMDb usados pelo produto. Expor no resumo público os campos já persistidos `tmdbId`, `backdropPath` e `runtimeMinutes`; a adição permite agrupar pelo identificador real, renderizar backdrop full bleed e apresentar vários horários reais sem N+1 ou chamada da TMDb no navegador.
+
+Recompor a Home como stage de programação, não landing page: filme ativo, pôster completo, dados existentes e horários como CTAs, seguidos por um rail com foco, teclado, scroll-snap e profundidade discreta. Busca, data, cinema e filme ativo são preservados em `sessionStorage` e refletidos em `URLSearchParams` por `replaceState`, evitando criar uma entrada de histórico por interação no router manual.
+
+Enriquecer o seed determinístico para oito sessões publicadas, três snapshots de filme, duas datas, dois cinemas e um rascunho, preservando as fixtures de ticket e portaria. Compartilhamento de sessão, arquivo iCalendar e impressão do ingresso usam Web Share, Clipboard, Blob e print CSS nativos. O QR, as regras do backend e o schema do banco não mudam.
+
+### Alternativas consideradas
+
+Carrossel ou animação de terceiros, Framer Motion, WebGL, consulta da TMDb pela Home, WebSocket/SSE para assentos, dados promocionais inventados, trailer, favoritos e download de PDF por biblioteca. Também foi analisado cancelar uma compra paga e devolver o assento.
+
+### Trade-offs
+
+O resumo público fica ligeiramente maior e o seed prepara mais assentos, mas a Home evita requisições adicionais e passa a demonstrar o modelo de programação. `navigator.share`, Clipboard, download e impressão dependem do suporte do navegador, sempre com fallback funcional. A URL usa substituição de estado, não histórico granular de filtros, para manter o router simples.
+
+Cancelamento de compra paga foi conscientemente descartado. A alocação vendida permanece em `ReservationSeat` com `seatId` único e é referenciada por `Ticket` via FK `RESTRICT`; liberar o lugar sem apagar o histórico exigiria desacoplar ou snapshotar o assento, criar novos estados e cobrir corridas entre cancelamento, nova compra e Gate. Preservar venda única e consumo atômico é mais importante que adicionar esse opcional na última passada.

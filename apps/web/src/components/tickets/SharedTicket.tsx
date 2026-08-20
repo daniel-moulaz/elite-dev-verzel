@@ -11,6 +11,7 @@ interface UnavailableMessage {
   kicker: string
   title: string
   description: string
+  retryable: boolean
 }
 
 function unavailableMessage(error: unknown): UnavailableMessage {
@@ -19,6 +20,7 @@ function unavailableMessage(error: unknown): UnavailableMessage {
       kicker: 'Link expirado',
       title: 'Este compartilhamento chegou ao fim.',
       description: 'Peça ao titular do ingresso para gerar um novo link.',
+      retryable: false,
     }
   }
 
@@ -27,6 +29,7 @@ function unavailableMessage(error: unknown): UnavailableMessage {
       kicker: 'Link revogado',
       title: 'Este compartilhamento foi desativado.',
       description: 'Peça ao titular do ingresso para gerar outro link.',
+      retryable: false,
     }
   }
 
@@ -35,6 +38,7 @@ function unavailableMessage(error: unknown): UnavailableMessage {
       kicker: 'Link inexistente',
       title: 'Não encontramos este ingresso.',
       description: 'Confira se o endereço foi copiado por completo.',
+      retryable: false,
     }
   }
 
@@ -42,6 +46,7 @@ function unavailableMessage(error: unknown): UnavailableMessage {
     kicker: 'Falha de conexão',
     title: 'Não foi possível abrir o ingresso.',
     description: 'Verifique sua conexão e tente novamente.',
+    retryable: true,
   }
 }
 
@@ -95,16 +100,18 @@ export function SharedTicket({ token, onBack }: SharedTicketProps) {
             <button type="button" className="secondary-button" onClick={onBack}>
               Ver programação
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setStatus('loading')
-                setMessage(null)
-                setReloadKey((value) => value + 1)
-              }}
-            >
-              Tentar novamente
-            </button>
+            {content.retryable ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setStatus('loading')
+                  setMessage(null)
+                  setReloadKey((value) => value + 1)
+                }}
+              >
+                Tentar novamente
+              </button>
+            ) : null}
           </div>
         </div>
       </div>

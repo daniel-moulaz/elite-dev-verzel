@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ApiError,
   getReservation,
@@ -13,6 +13,10 @@ import {
   tmdbPosterUrl,
 } from '../organizer/formatters'
 import { PosterImage } from '../common/PosterImage'
+
+const holdDurationMilliseconds = 10 * 60 * 1_000
+const warningThresholdMilliseconds = 2 * 60 * 1_000
+const criticalThresholdMilliseconds = 60 * 1_000
 
 interface ReservationSummaryProps {
   reservationId: string
@@ -65,6 +69,12 @@ export function ReservationSummary({
   const [reloadKey, setReloadKey] = useState(0)
   const [paymentAction, setPaymentAction] = useState<PaymentStatus | null>(null)
   const [issuedTicketId, setIssuedTicketId] = useState<string | null>(null)
+  const [isCheckingExpiration, setIsCheckingExpiration] = useState(false)
+  const [isSynchronizing, setIsSynchronizing] = useState(
+    Boolean(initialReservation),
+  )
+  const paymentInFlightRef = useRef(false)
+  const expirationCheckInFlightRef = useRef(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -73,6 +83,9 @@ export function ReservationSummary({
       .then((result) => {
         setReservation(result)
         setRemainingMilliseconds(reservationRemainingTime(result))
+        setErrorMessage('')
+        setIsCheckingExpiration(false)
+        expirationCheckInFlightRef.current = false
         setStatus('ready')
       })
       .catch((error: unknown) => {
@@ -87,6 +100,11 @@ export function ReservationSummary({
         )
         setStatus('error')
       })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsSynchronizing(false)
+        }
+      })
 
     return () => controller.abort()
   }, [accessToken, reloadKey, reservationId])
@@ -100,18 +118,26 @@ export function ReservationSummary({
     }
 
     const controller = new AbortController()
-    let expirationWasChecked = false
+    let nextExpirationCheckAt = 0
 
     function updateCountdown() {
       const remaining = new Date(expiresAt as string).getTime() - Date.now()
       setRemainingMilliseconds(Math.max(0, remaining))
 
-      if (remaining <= 0 && !expirationWasChecked) {
-        expirationWasChecked = true
+      if (
+        remaining <= 0 &&
+        Date.now() >= nextExpirationCheckAt &&
+        !expirationCheckInFlightRef.current &&
+        !paymentInFlightRef.current
+      ) {
+        nextExpirationCheckAt = Date.now() + 5_000
+        expirationCheckInFlightRef.current = true
+        setIsCheckingExpiration(true)
         getReservation(accessToken, reservationId, controller.signal)
           .then((result) => {
             setReservation(result)
             setRemainingMilliseconds(reservationRemainingTime(result))
+            setErrorMessage('')
           })
           .catch((error: unknown) => {
             if (!controller.signal.aborted) {
@@ -122,12 +148,20 @@ export function ReservationSummary({
               )
             }
           })
+          .finally(() => {
+            expirationCheckInFlightRef.current = false
+            if (!controller.signal.aborted) {
+              setIsCheckingExpiration(false)
+            }
+          })
       }
     }
 
+    updateCountdown()
     const intervalId = window.setInterval(updateCountdown, 1_000)
 
     return () => {
+      expirationCheckInFlightRef.current = false
       controller.abort()
       window.clearInterval(intervalId)
     }
@@ -135,11 +169,25 @@ export function ReservationSummary({
 
   function retryReservation() {
     setStatus('loading')
+    setIsSynchronizing(true)
     setErrorMessage('')
+    setIsCheckingExpiration(false)
+    expirationCheckInFlightRef.current = false
     setReloadKey((value) => value + 1)
   }
 
   async function simulatePayment(outcome: PaymentStatus) {
+    if (
+      paymentInFlightRef.current ||
+      expirationCheckInFlightRef.current ||
+      reservation?.status !== 'PENDING' ||
+      isCheckingExpiration ||
+      isSynchronizing
+    ) {
+      return
+    }
+
+    paymentInFlightRef.current = true
     setPaymentAction(outcome)
     setErrorMessage('')
 
@@ -158,6 +206,7 @@ export function ReservationSummary({
           : current,
       )
       setIssuedTicketId(result.tickets[0]?.id ?? null)
+      setIsCheckingExpiration(false)
     } catch (error) {
       setErrorMessage(
         error instanceof ApiError
@@ -174,6 +223,7 @@ export function ReservationSummary({
         setReloadKey((value) => value + 1)
       }
     } finally {
+      paymentInFlightRef.current = false
       setPaymentAction(null)
     }
   }
@@ -210,11 +260,21 @@ export function ReservationSummary({
   }
 
   const isPending = reservation.status === 'PENDING'
-  const isLocallyExpired = isPending && remainingMilliseconds <= 0
-  const isExpired = reservation.status === 'EXPIRED' || isLocallyExpired
+  const deadlineReachedLocally = isPending && remainingMilliseconds <= 0
+  const isExpired = reservation.status === 'EXPIRED'
   const isPaid = reservation.status === 'PAID'
   const isCancelled = reservation.status === 'CANCELLED'
   const posterUrl = tmdbPosterUrl(reservation.session.movie.posterPath)
+  const countdownState =
+    remainingMilliseconds <= criticalThresholdMilliseconds
+      ? 'critical'
+      : remainingMilliseconds <= warningThresholdMilliseconds
+        ? 'warning'
+        : 'normal'
+  const progressPercentage = Math.min(
+    100,
+    Math.max(0, (remainingMilliseconds / holdDurationMilliseconds) * 100),
+  )
 
   return (
     <div className="public-content reservation-page">
@@ -223,7 +283,7 @@ export function ReservationSummary({
       </button>
 
       <article
-        className={`reservation-ticket ${isExpired ? 'reservation-expired' : ''} ${isCancelled ? 'reservation-cancelled' : ''} ${isPaid ? 'reservation-paid' : ''}`}
+        className={`reservation-ticket ${isExpired ? 'reservation-expired' : ''} ${isCancelled ? 'reservation-cancelled' : ''} ${isPaid ? 'reservation-paid' : ''} ${isPending ? `reservation-${countdownState}` : ''} ${isCheckingExpiration ? 'reservation-confirming' : ''}`}
       >
         <div className="reservation-ticket-main">
           <PosterImage
@@ -241,6 +301,8 @@ export function ReservationSummary({
                   ? 'Pagamento aprovado'
                   : isCancelled
                     ? 'Pagamento recusado'
+                    : isCheckingExpiration
+                      ? 'Confirmando prazo'
                     : 'Lugares reservados'}
             </p>
             <h1>{reservation.session.movie.title}</h1>
@@ -251,6 +313,10 @@ export function ReservationSummary({
                   ? 'Pagamento simulado aprovado. Seus ingressos foram emitidos.'
                   : isCancelled
                     ? 'Pagamento simulado recusado. Nenhum ingresso foi emitido e os lugares foram liberados.'
+                    : isCheckingExpiration
+                      ? 'O contador chegou a zero. Estamos confirmando o estado da reserva com o servidor.'
+                      : deadlineReachedLocally
+                        ? 'O servidor confirmará o prazo antes de processar qualquer ação.'
                     : 'Seus lugares estão protegidos temporariamente. O servidor confirma o prazo abaixo.'}
             </p>
 
@@ -286,14 +352,28 @@ export function ReservationSummary({
         </div>
 
         <aside
-          className="reservation-timer"
-          role={isPending && !isLocallyExpired ? 'timer' : 'status'}
-          aria-live={isPending && !isLocallyExpired ? 'off' : 'polite'}
+          className={`reservation-timer ${isPending ? `timer-${countdownState}` : ''}`.trim()}
+          role={isPending && !isCheckingExpiration ? 'timer' : 'status'}
+          aria-live={isPending && !isCheckingExpiration ? 'off' : 'polite'}
         >
           <span className="reservation-status-icon" aria-hidden="true">
-            {isExpired ? '⌛' : isPaid ? '✓' : isCancelled ? '×' : '◷'}
+            {isExpired
+              ? '⌛'
+              : isPaid
+                ? '✓'
+                : isCancelled
+                  ? '×'
+                  : isCheckingExpiration
+                    ? '…'
+                    : '◷'}
           </span>
-          <span>{isPending && !isLocallyExpired ? 'Tempo restante' : 'Status'}</span>
+          <span>
+            {isCheckingExpiration
+              ? 'Confirmando prazo'
+              : isPending
+                ? 'Tempo restante'
+                : 'Status'}
+          </span>
           <strong>
             {isExpired
               ? 'EXPIRADA'
@@ -301,15 +381,30 @@ export function ReservationSummary({
                 ? 'APROVADO'
                 : isCancelled
                   ? 'RECUSADO'
+                  : isCheckingExpiration
+                    ? 'AGUARDE'
                   : formatRemainingTime(remainingMilliseconds)}
           </strong>
+          {isPending ? (
+            <div className="reservation-progress" aria-hidden="true">
+              <span style={{ width: `${progressPercentage}%` }} />
+            </div>
+          ) : null}
           <p>
             {isExpired
               ? 'Escolha os lugares novamente para criar uma nova reserva.'
               : isPaid
-                ? 'O assento permanece reservado e o ingresso já está disponível.'
+                ? 'Seus lugares permanecem reservados e os ingressos já estão disponíveis.'
                 : isCancelled
                   ? 'Você pode voltar à sessão e escolher lugares disponíveis.'
+                  : isCheckingExpiration
+                    ? 'Aguarde a confirmação do servidor antes de continuar.'
+                    : deadlineReachedLocally
+                      ? 'O servidor ainda é a autoridade sobre a validade desta reserva.'
+                      : countdownState === 'critical'
+                        ? 'Último minuto para concluir o pagamento simulado.'
+                        : countdownState === 'warning'
+                          ? 'Restam menos de dois minutos para concluir.'
                   : 'Escolha abaixo qual resultado de pagamento deseja demonstrar.'}
           </p>
         </aside>
@@ -353,21 +448,29 @@ export function ReservationSummary({
             <button
               type="button"
               onClick={() => void simulatePayment('APPROVED')}
-              disabled={paymentAction !== null || isLocallyExpired}
+              disabled={
+                paymentAction !== null || isCheckingExpiration || isSynchronizing
+              }
             >
-              {paymentAction === 'APPROVED'
-                ? 'Aprovando…'
-                : 'Aprovar pagamento'}
+              {isSynchronizing
+                ? 'Sincronizando…'
+                : paymentAction === 'APPROVED'
+                  ? 'Aprovando…'
+                  : 'Aprovar pagamento'}
             </button>
             <button
               type="button"
               className="secondary-button decline-button"
               onClick={() => void simulatePayment('DECLINED')}
-              disabled={paymentAction !== null || isLocallyExpired}
+              disabled={
+                paymentAction !== null || isCheckingExpiration || isSynchronizing
+              }
             >
-              {paymentAction === 'DECLINED'
-                ? 'Recusando…'
-                : 'Recusar pagamento'}
+              {isSynchronizing
+                ? 'Sincronizando…'
+                : paymentAction === 'DECLINED'
+                  ? 'Recusando…'
+                  : 'Recusar pagamento'}
             </button>
           </div>
         </section>

@@ -1,6 +1,9 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
+  useRef,
   useState,
   type FormEvent,
 } from 'react'
@@ -13,16 +16,46 @@ import {
   type Reservation,
 } from './api'
 import { BrandLockup } from './components/common/BrandLockup'
-import { GateArea } from './components/gate/GateArea'
-import { OrganizerArea } from './components/organizer/OrganizerArea'
+import { useToast } from './components/common/toast'
 import { PublicCatalog } from './components/public/PublicCatalog'
 import { PublicHeader } from './components/public/PublicHeader'
-import { ReservationSummary } from './components/public/ReservationSummary'
-import { SessionDetail } from './components/public/SessionDetail'
 import { TmdbAttribution } from './components/public/TmdbAttribution'
-import { SharedTicket } from './components/tickets/SharedTicket'
-import { TicketDetail } from './components/tickets/TicketDetail'
-import { TicketList } from './components/tickets/TicketList'
+
+const GateArea = lazy(() =>
+  import('./components/gate/GateArea').then((module) => ({
+    default: module.GateArea,
+  })),
+)
+const OrganizerArea = lazy(() =>
+  import('./components/organizer/OrganizerArea').then((module) => ({
+    default: module.OrganizerArea,
+  })),
+)
+const ReservationSummary = lazy(() =>
+  import('./components/public/ReservationSummary').then((module) => ({
+    default: module.ReservationSummary,
+  })),
+)
+const SessionDetail = lazy(() =>
+  import('./components/public/SessionDetail').then((module) => ({
+    default: module.SessionDetail,
+  })),
+)
+const SharedTicket = lazy(() =>
+  import('./components/tickets/SharedTicket').then((module) => ({
+    default: module.SharedTicket,
+  })),
+)
+const TicketDetail = lazy(() =>
+  import('./components/tickets/TicketDetail').then((module) => ({
+    default: module.TicketDetail,
+  })),
+)
+const TicketList = lazy(() =>
+  import('./components/tickets/TicketList').then((module) => ({
+    default: module.TicketList,
+  })),
+)
 
 const accessTokenKey = 'elite-dev-access-token'
 
@@ -111,11 +144,75 @@ function routePath(route: PublicRoute): string {
   return route.name === 'login' ? '/login' : '/'
 }
 
+function routeTitle(route: PublicRoute): string {
+  switch (route.name) {
+    case 'login':
+      return 'SEPTEM | Entrar'
+    case 'session':
+      return 'SEPTEM | Escolha de assentos'
+    case 'reservation':
+      return 'SEPTEM | Checkout'
+    case 'tickets':
+      return 'SEPTEM | Meus ingressos'
+    case 'ticket':
+      return 'SEPTEM | Ingresso'
+    case 'shared':
+      return 'SEPTEM | Ingresso compartilhado'
+    default:
+      return 'SEPTEM | Programação'
+  }
+}
+
+function RouteLoading({ label }: { label: string }) {
+  return (
+    <div className="public-content route-loading" aria-busy="true">
+      <div className="content-state public-state" aria-live="polite">
+        <p className="section-kicker">SEPTEM</p>
+        <h1>{label}</h1>
+      </div>
+    </div>
+  )
+}
+
+function StandaloneRouteLoading({ label }: { label: string }) {
+  return (
+    <main
+      id="main-content"
+      className="app-shell route-loading"
+      aria-busy="true"
+      tabIndex={-1}
+    >
+      <section className="auth-panel status-panel" aria-live="polite">
+        <BrandLockup />
+        <p className="section-kicker">SEPTEM</p>
+        <h1>{label}</h1>
+      </section>
+    </main>
+  )
+}
+
+function customerRouteLoadingLabel(route: PublicRoute): string {
+  switch (route.name) {
+    case 'reservation':
+      return 'Abrindo o checkout…'
+    case 'tickets':
+      return 'Abrindo seus ingressos…'
+    case 'ticket':
+      return 'Preparando seu ingresso…'
+    case 'session':
+      return 'Preparando a sessão…'
+    default:
+      return 'Carregando a programação…'
+  }
+}
+
 interface LoginScreenProps {
   notice: string | undefined
   errorMessage: string | null
+  hasCredentialError: boolean
   isSubmitting: boolean
   onBack: () => void
+  onClearError: () => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }
 
@@ -129,20 +226,28 @@ const demoAccounts = [
 function LoginScreen({
   notice,
   errorMessage,
+  hasCredentialError,
   isSubmitting,
   onBack,
+  onClearError,
   onSubmit,
 }: LoginScreenProps) {
+  const { notify } = useToast()
+  const submitButtonRef = useRef<HTMLButtonElement>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
 
   function fillDemoAccount(accountEmail: string) {
+    onClearError()
     setEmail(accountEmail)
     setPassword('Demo@123')
+    notify('Credenciais de demonstração preenchidas.', 'success')
+    window.requestAnimationFrame(() => submitButtonRef.current?.focus())
   }
 
   return (
-    <main className="app-shell login-shell">
+    <main id="main-content" className="app-shell login-shell" tabIndex={-1}>
       <section className="auth-panel">
         <div className="login-panel-header">
           <BrandLockup />
@@ -171,8 +276,13 @@ function LoginScreen({
               name="email"
               type="email"
               value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              onChange={(event) => {
+                setEmail(event.target.value)
+                onClearError()
+              }}
               autoComplete="email"
+              aria-invalid={hasCredentialError}
+              aria-describedby={errorMessage ? 'login-error' : undefined}
               required
               disabled={isSubmitting}
             />
@@ -180,25 +290,42 @@ function LoginScreen({
 
           <div className="field">
             <label htmlFor="password">Senha</label>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete="current-password"
-              required
-              disabled={isSubmitting}
-            />
+            <div className="password-field">
+              <input
+                id="password"
+                name="password"
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(event) => {
+                  setPassword(event.target.value)
+                  onClearError()
+                }}
+                autoComplete="current-password"
+                aria-invalid={hasCredentialError}
+                aria-describedby={errorMessage ? 'login-error' : undefined}
+                required
+                disabled={isSubmitting}
+              />
+              <button
+                type="button"
+                className="password-toggle"
+                onClick={() => setShowPassword((current) => !current)}
+                aria-pressed={showPassword}
+                aria-controls="password"
+                disabled={isSubmitting}
+              >
+                {showPassword ? 'Ocultar' : 'Mostrar'}
+              </button>
+            </div>
           </div>
 
           {errorMessage ? (
-            <p className="message error-message" role="alert">
+            <p id="login-error" className="message error-message" role="alert">
               {errorMessage}
             </p>
           ) : null}
 
-          <button type="submit" disabled={isSubmitting}>
+          <button ref={submitButtonRef} type="submit" disabled={isSubmitting}>
             {isSubmitting ? 'Entrando…' : 'Entrar'}
           </button>
         </form>
@@ -234,6 +361,9 @@ export function App() {
   const [loginReturnPath, setLoginReturnPath] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [loginError, setLoginError] = useState<string | null>(null)
+  const [loginErrorKind, setLoginErrorKind] = useState<
+    'credentials' | 'system' | null
+  >(null)
   const [createdReservation, setCreatedReservation] =
     useState<Reservation | null>(null)
 
@@ -245,17 +375,47 @@ export function App() {
     }
     setRoute(parsePublicRoute(path))
     window.scrollTo({ top: 0, behavior: 'auto' })
+    window.requestAnimationFrame(() => {
+      document.getElementById('main-content')?.focus({ preventScroll: true })
+    })
   }, [])
+
+  const openHome = useCallback(() => {
+    if (route.name === 'catalog') {
+      window.scrollTo({ top: 0, behavior: 'auto' })
+      document.getElementById('main-content')?.focus({ preventScroll: true })
+      return
+    }
+
+    navigate('/')
+  }, [navigate, route.name])
 
   const clearAuthentication = useCallback(() => {
     sessionStorage.removeItem(accessTokenKey)
     setLoginError(null)
+    setLoginErrorKind(null)
     setAuthState({ status: 'anonymous' })
   }, [])
+
+  const expireAuthentication = useCallback(() => {
+    const returnPath = `${window.location.pathname}${window.location.search}`
+    sessionStorage.removeItem(accessTokenKey)
+    setLoginError(null)
+    setLoginErrorKind(null)
+    setLoginReturnPath(returnPath === '/login' ? '/' : returnPath)
+    setAuthState({
+      status: 'anonymous',
+      notice: 'Sua sessão expirou. Entre novamente para continuar.',
+    })
+    navigate('/login', true)
+  }, [navigate])
 
   useEffect(() => {
     function handlePopState() {
       setRoute(parsePublicRoute())
+      window.requestAnimationFrame(() => {
+        document.getElementById('main-content')?.focus({ preventScroll: true })
+      })
     }
 
     window.addEventListener('popstate', handlePopState)
@@ -263,9 +423,23 @@ export function App() {
   }, [])
 
   useEffect(() => {
-    setUnauthorizedHandler(clearAuthentication)
+    setUnauthorizedHandler(expireAuthentication)
     return () => setUnauthorizedHandler(null)
-  }, [clearAuthentication])
+  }, [expireAuthentication])
+
+  useEffect(() => {
+    if (authState.status === 'authenticated') {
+      document.title =
+        authState.user.role === 'ORGANIZER'
+          ? 'SEPTEM | Organização'
+          : authState.user.role === 'GATE'
+            ? 'SEPTEM | Portaria'
+            : routeTitle(route)
+      return
+    }
+
+    document.title = routeTitle(route)
+  }, [authState, route])
 
   useEffect(() => {
     const accessToken = sessionStorage.getItem(accessTokenKey)
@@ -304,6 +478,7 @@ export function App() {
   function requestLogin(returnPath: string) {
     setLoginReturnPath(returnPath)
     setLoginError(null)
+    setLoginErrorKind(null)
     navigate('/login')
   }
 
@@ -311,6 +486,7 @@ export function App() {
     event.preventDefault()
     setIsSubmitting(true)
     setLoginError(null)
+    setLoginErrorKind(null)
 
     const form = event.currentTarget
     const formData = new FormData(form)
@@ -333,6 +509,11 @@ export function App() {
       )
       setLoginReturnPath(null)
     } catch (error) {
+      setLoginErrorKind(
+        error instanceof ApiError && error.status === 401
+          ? 'credentials'
+          : 'system',
+      )
       setLoginError(
         error instanceof ApiError
           ? error.message
@@ -356,7 +537,12 @@ export function App() {
 
   if (authState.status === 'restoring') {
     return (
-      <main className="app-shell" aria-busy="true">
+      <main
+        id="main-content"
+        className="app-shell"
+        aria-busy="true"
+        tabIndex={-1}
+      >
         <section className="auth-panel status-panel" aria-live="polite">
           <BrandLockup />
           <p className="eyebrow">Acesso seguro</p>
@@ -372,18 +558,20 @@ export function App() {
       <div className="public-shell">
         <PublicHeader
           user={undefined}
-          onHome={() => navigate('/')}
+          onHome={openHome}
           onLogin={() => requestLogin(routePath(route))}
           onLogout={handleLogout}
           onTickets={() => navigate('/me/tickets')}
           publicOnly
         />
-        <main>
-          <SharedTicket
-            key={route.token}
-            token={route.token}
-            onBack={() => navigate('/')}
-          />
+        <main id="main-content" tabIndex={-1}>
+          <Suspense fallback={<RouteLoading label="Abrindo ingresso…" />}>
+            <SharedTicket
+              key={route.token}
+              token={route.token}
+              onBack={() => navigate('/')}
+            />
+          </Suspense>
         </main>
         <TmdbAttribution />
       </div>
@@ -393,21 +581,29 @@ export function App() {
   if (authState.status === 'authenticated') {
     if (authState.user.role === 'ORGANIZER') {
       return (
-        <OrganizerArea
-          accessToken={authState.accessToken}
-          user={authState.user}
-          onLogout={handleLogout}
-        />
+        <Suspense
+          fallback={<StandaloneRouteLoading label="Abrindo a organização…" />}
+        >
+          <OrganizerArea
+            accessToken={authState.accessToken}
+            user={authState.user}
+            onLogout={handleLogout}
+          />
+        </Suspense>
       )
     }
 
     if (authState.user.role === 'GATE') {
       return (
-        <GateArea
-          accessToken={authState.accessToken}
-          user={authState.user}
-          onLogout={handleLogout}
-        />
+        <Suspense
+          fallback={<StandaloneRouteLoading label="Preparando a portaria…" />}
+        >
+          <GateArea
+            accessToken={authState.accessToken}
+            user={authState.user}
+            onLogout={handleLogout}
+          />
+        </Suspense>
       )
     }
   }
@@ -417,8 +613,13 @@ export function App() {
       <LoginScreen
         notice={authState.status === 'anonymous' ? authState.notice : undefined}
         errorMessage={loginError}
+        hasCredentialError={loginErrorKind === 'credentials'}
         isSubmitting={isSubmitting}
         onBack={() => navigate(loginReturnPath ?? '/')}
+        onClearError={() => {
+          setLoginError(null)
+          setLoginErrorKind(null)
+        }}
         onSubmit={(event) => void handleLogin(event)}
       />
     )
@@ -433,7 +634,7 @@ export function App() {
     <div className="public-shell">
       <PublicHeader
         user={customer}
-        onHome={() => navigate('/')}
+        onHome={openHome}
         onLogin={() => requestLogin(routePath(route))}
         onLogout={handleLogout}
         onTickets={() => navigate('/me/tickets')}
@@ -443,7 +644,10 @@ export function App() {
             : 'programming'
         }
       />
-      <main>
+      <main id="main-content" tabIndex={-1}>
+        <Suspense
+          fallback={<RouteLoading label={customerRouteLoadingLabel(route)} />}
+        >
         {route.name === 'session' ? (
           <SessionDetail
             key={route.sessionId}
@@ -509,6 +713,7 @@ export function App() {
             onOpenSession={(sessionId) => navigate(`/sessions/${sessionId}`)}
           />
         )}
+        </Suspense>
       </main>
       <TmdbAttribution />
     </div>

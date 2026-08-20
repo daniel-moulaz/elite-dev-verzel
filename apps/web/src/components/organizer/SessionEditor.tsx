@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   ApiError,
   createOrganizerSession,
@@ -13,17 +13,20 @@ import {
 import {
   formatPrice,
   formatSessionDate,
-  movieYear,
   tmdbPosterUrl,
   toDateTimeLocalValue,
 } from './formatters'
 import { PosterImage } from '../common/PosterImage'
+import { useToast } from '../common/toast'
 import { MoviePicker } from './MoviePicker'
 
 interface SessionEditorProps {
   accessToken: string
   sessionId?: string
   onBack: () => void
+  onCreated?: (sessionId: string) => void
+  onDirtyChange: (isDirty: boolean) => void
+  onBusyChange: (isBusy: boolean) => void
 }
 
 interface SessionFormState {
@@ -34,6 +37,14 @@ interface SessionFormState {
   price: string
   rows: string
   seatsPerRow: string
+}
+
+type SessionFormField = keyof SessionFormState | 'movie'
+type SessionFormErrors = Partial<Record<SessionFormField, string>>
+
+interface SessionValidation {
+  input: SessionInput | null
+  errors: SessionFormErrors
 }
 
 const emptyForm: SessionFormState = {
@@ -114,30 +125,34 @@ function changesFromSession(
 function validateForm(
   form: SessionFormState,
   movie: CatalogMovie | null,
-): SessionInput | string {
+): SessionValidation {
+  const errors: SessionFormErrors = {}
+
   if (!movie) {
-    return 'Selecione um filme antes de salvar.'
+    errors.movie = 'Selecione um filme antes de salvar.'
   }
 
   const startsAt = new Date(form.startsAt)
   if (!form.startsAt || Number.isNaN(startsAt.getTime())) {
-    return 'Informe uma data e hora válidas.'
-  }
-
-  if (startsAt.getTime() <= Date.now()) {
-    return 'A sessão precisa começar no futuro.'
+    errors.startsAt = 'Informe uma data e hora válidas.'
+  } else if (startsAt.getTime() <= Date.now()) {
+    errors.startsAt = 'A sessão precisa começar no futuro.'
   }
 
   const price = Number(form.price)
   const rows = Number(form.rows)
   const seatsPerRow = Number(form.seatsPerRow)
 
-  if (!Number.isFinite(price) || price < 0) {
-    return 'Informe um preço válido, igual ou maior que zero.'
+  if (!form.price.trim() || !Number.isFinite(price) || price < 0) {
+    errors.price = 'Informe um preço válido, igual ou maior que zero.'
+  } else if (price > 100_000) {
+    errors.price = 'O preço máximo é R$ 100.000,00.'
+  } else if (!/^\d+(?:\.\d{1,2})?$/.test(form.price)) {
+    errors.price = 'Use no máximo duas casas decimais.'
   }
 
   if (!Number.isInteger(rows) || rows < 1 || rows > 10) {
-    return 'O layout deve ter entre 1 e 10 fileiras.'
+    errors.rows = 'Informe entre 1 e 10 fileiras.'
   }
 
   if (
@@ -145,26 +160,37 @@ function validateForm(
     seatsPerRow < 1 ||
     seatsPerRow > 20
   ) {
-    return 'Cada fileira deve ter entre 1 e 20 assentos.'
+    errors.seatsPerRow = 'Informe entre 1 e 20 assentos por fileira.'
   }
 
-  if (
-    !form.venueName.trim() ||
-    !form.roomName.trim() ||
-    !form.address.trim()
-  ) {
-    return 'Preencha local, sala e endereço.'
+  if (!form.venueName.trim()) {
+    errors.venueName = 'Informe o cinema ou local.'
+  }
+
+  if (!form.roomName.trim()) {
+    errors.roomName = 'Informe a sala.'
+  }
+
+  if (!form.address.trim()) {
+    errors.address = 'Informe o endereço.'
+  }
+
+  if (!movie || Object.keys(errors).length > 0) {
+    return { input: null, errors }
   }
 
   return {
-    tmdbMovieId: movie.id,
-    startsAt: startsAt.toISOString(),
-    venueName: form.venueName.trim(),
-    roomName: form.roomName.trim(),
-    address: form.address.trim(),
-    priceCents: Math.round(price * 100),
-    rows,
-    seatsPerRow,
+    input: {
+      tmdbMovieId: movie.id,
+      startsAt: startsAt.toISOString(),
+      venueName: form.venueName.trim(),
+      roomName: form.roomName.trim(),
+      address: form.address.trim(),
+      priceCents: Math.round(price * 100),
+      rows,
+      seatsPerRow,
+    },
+    errors,
   }
 }
 
@@ -222,6 +248,12 @@ interface PublishedSessionProps {
 
 function PublishedSession({ session }: PublishedSessionProps) {
   const posterUrl = tmdbPosterUrl(session.movie.posterPath)
+  const movieMeta = [
+    session.movie.releaseDate?.slice(0, 4),
+    session.movie.runtimeMinutes
+      ? `${session.movie.runtimeMinutes} min`
+      : null,
+  ].filter((detail): detail is string => Boolean(detail))
 
   return (
     <article className="published-session">
@@ -234,12 +266,9 @@ function PublishedSession({ session }: PublishedSessionProps) {
         <div>
           <span className="status-badge status-published">Publicada</span>
           <h2>{session.movie.title}</h2>
-          <p className="movie-meta">
-            {movieYear(session.movie.releaseDate)}
-            {session.movie.runtimeMinutes
-              ? ` · ${session.movie.runtimeMinutes} min`
-              : ''}
-          </p>
+          {movieMeta.length > 0 ? (
+            <p className="movie-meta">{movieMeta.join(' · ')}</p>
+          ) : null}
           {session.movie.overview ? <p>{session.movie.overview}</p> : null}
         </div>
       </div>
@@ -289,18 +318,55 @@ export function SessionEditor({
   accessToken,
   sessionId,
   onBack,
+  onCreated,
+  onDirtyChange,
+  onBusyChange,
 }: SessionEditorProps) {
+  const { notify } = useToast()
   const [session, setSession] = useState<OrganizerSession | null>(null)
   const [selectedMovie, setSelectedMovie] = useState<CatalogMovie | null>(null)
   const [form, setForm] = useState<SessionFormState>(emptyForm)
   const [isLoading, setIsLoading] = useState(Boolean(sessionId))
   const [isSaving, setIsSaving] = useState(false)
   const [isPublishing, setIsPublishing] = useState(false)
+  const [isSelectingMovie, setIsSelectingMovie] = useState(false)
   const [isDirty, setIsDirty] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<SessionFormErrors>({})
   const [loadRevision, setLoadRevision] = useState(0)
+  const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false)
+  const publishDialogRef = useRef<HTMLDialogElement>(null)
+
+  useEffect(() => {
+    const isBusy = isSaving || isPublishing || isSelectingMovie
+    onBusyChange(isBusy)
+
+    return () => onBusyChange(false)
+  }, [isPublishing, isSaving, isSelectingMovie, onBusyChange])
+
+  function updateDirtyState(nextIsDirty: boolean) {
+    setIsDirty(nextIsDirty)
+    onDirtyChange(nextIsDirty)
+  }
+
+  useEffect(() => {
+    const dialog = publishDialogRef.current
+
+    if (!dialog) {
+      return
+    }
+
+    if (isPublishDialogOpen && !dialog.open) {
+      dialog.showModal()
+      return
+    }
+
+    if (!isPublishDialogOpen && dialog.open) {
+      dialog.close()
+    }
+  }, [isPublishDialogOpen])
 
   useEffect(() => {
     if (!sessionId) {
@@ -315,6 +381,7 @@ export function SessionEditor({
         setSelectedMovie(movieFromSession(loadedSession))
         setForm(formFromSession(loadedSession))
         setIsDirty(false)
+        onDirtyChange(false)
       })
       .catch((requestError: unknown) => {
         if (controller.signal.aborted) {
@@ -334,12 +401,18 @@ export function SessionEditor({
       })
 
     return () => controller.abort()
-  }, [accessToken, loadRevision, sessionId])
+  }, [accessToken, loadRevision, onDirtyChange, sessionId])
 
   function updateField(field: keyof SessionFormState, value: string) {
     setForm((current) => ({ ...current, [field]: value }))
-    setIsDirty(true)
+    setFieldErrors((current) => {
+      const next = { ...current }
+      delete next[field]
+      return next
+    })
+    updateDirtyState(true)
     setNotice(null)
+    setActionError(null)
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -347,13 +420,27 @@ export function SessionEditor({
     setActionError(null)
     setNotice(null)
 
-    const input = validateForm(form, selectedMovie)
-    if (typeof input === 'string') {
-      setActionError(input)
+    const validation = validateForm(form, selectedMovie)
+    if (!validation.input) {
+      setFieldErrors(validation.errors)
+      setActionError('Revise os campos destacados antes de salvar.')
+      window.requestAnimationFrame(() => {
+        const firstInvalidField =
+          document.querySelector<HTMLElement>(
+            '.session-form [aria-invalid="true"]',
+          ) ??
+          document.querySelector<HTMLElement>(
+            '.movie-picker button, .movie-picker input',
+          )
+        firstInvalidField?.focus()
+      })
       return
     }
 
+    const input = validation.input
+    setFieldErrors({})
     setIsSaving(true)
+    const isNewSession = session === null
 
     try {
       let savedSession: OrganizerSession
@@ -362,7 +449,7 @@ export function SessionEditor({
         const changes = changesFromSession(session, input)
 
         if (Object.keys(changes).length === 0) {
-          setIsDirty(false)
+          updateDirtyState(false)
           setNotice('O rascunho já está atualizado.')
           return
         }
@@ -379,12 +466,17 @@ export function SessionEditor({
       setSession(savedSession)
       setSelectedMovie(movieFromSession(savedSession))
       setForm(formFromSession(savedSession))
-      setIsDirty(false)
-      setNotice(
-        session
-          ? 'Rascunho atualizado com sucesso.'
-          : 'Rascunho criado com sucesso. Agora você pode publicá-lo.',
-      )
+      updateDirtyState(false)
+
+      const successMessage = isNewSession
+        ? 'Rascunho criado com sucesso. Agora você pode publicá-lo.'
+        : 'Rascunho atualizado com sucesso.'
+
+      notify(successMessage, 'success')
+
+      if (isNewSession) {
+        onCreated?.(savedSession.id)
+      }
     } catch (saveError) {
       setActionError(
         saveError instanceof ApiError
@@ -411,7 +503,8 @@ export function SessionEditor({
         session.id,
       )
       setSession(publishedSession)
-      setNotice('Sessão publicada. A estrutura agora está bloqueada.')
+      setIsPublishDialogOpen(false)
+      notify('Sessão publicada. A estrutura agora está bloqueada.', 'success')
     } catch (publishError) {
       setActionError(
         publishError instanceof ApiError
@@ -462,9 +555,14 @@ export function SessionEditor({
   }
 
   const isPublished = session?.status === 'PUBLISHED'
-  const isBusy = isSaving || isPublishing
+  const isBusy = isSaving || isPublishing || isSelectingMovie
   const rows = Number(form.rows)
   const seatsPerRow = Number(form.seatsPerRow)
+  const priceValue = Number(form.price)
+  const pricePreview =
+    form.price.trim() && Number.isFinite(priceValue) && priceValue >= 0
+      ? formatPrice(Math.round(priceValue * 100))
+      : null
   const capacity =
     Number.isInteger(rows) &&
     rows >= 1 &&
@@ -476,7 +574,12 @@ export function SessionEditor({
       : 0
   return (
     <section className="organizer-content" aria-labelledby="editor-title">
-      <button type="button" className="back-button" onClick={onBack}>
+      <button
+        type="button"
+        className="back-button"
+        onClick={onBack}
+        disabled={isBusy}
+      >
         <span aria-hidden="true">←</span> Minhas sessões
       </button>
 
@@ -498,12 +601,21 @@ export function SessionEditor({
               : 'Escolha o filme e configure apenas o necessário para a exibição.'}
           </p>
         </div>
-        {session ? (
-          <span
-            className={`status-badge status-${session.status.toLowerCase()}`}
-          >
-            {isPublished ? 'Publicada' : 'Rascunho'}
-          </span>
+        {isDirty || session ? (
+          <div className="button-row">
+            {isDirty ? (
+              <span className="status-badge status-draft" role="status">
+                Alterações não salvas
+              </span>
+            ) : null}
+            {session ? (
+              <span
+                className={`status-badge status-${session.status.toLowerCase()}`}
+              >
+                {isPublished ? 'Publicada' : 'Rascunho'}
+              </span>
+            ) : null}
+          </div>
         ) : null}
       </div>
 
@@ -513,7 +625,7 @@ export function SessionEditor({
         </p>
       ) : null}
 
-      {actionError ? (
+      {actionError && !isPublishDialogOpen ? (
         <p className="message error-message" role="alert">
           {actionError}
         </p>
@@ -529,15 +641,29 @@ export function SessionEditor({
             selectedMovie={selectedMovie}
             onSelect={(movie) => {
               setSelectedMovie(movie)
-              setIsDirty(true)
+              setFieldErrors((current) => {
+                const next = { ...current }
+                delete next.movie
+                return next
+              })
+              updateDirtyState(true)
               setNotice(null)
+              setActionError(null)
             }}
+            onSelectionBusyChange={setIsSelectingMovie}
           />
+
+          {fieldErrors.movie ? (
+            <p className="field-error movie-picker-error">
+              {fieldErrors.movie}
+            </p>
+          ) : null}
 
           <form
             className="session-form"
             aria-busy={isBusy}
             onSubmit={handleSubmit}
+            noValidate
           >
             <div className="form-section-heading">
               <p className="section-kicker">Passo 2</p>
@@ -555,8 +681,17 @@ export function SessionEditor({
                   onChange={(event) =>
                     updateField('startsAt', event.target.value)
                   }
+                  aria-invalid={Boolean(fieldErrors.startsAt)}
+                  aria-describedby={
+                    fieldErrors.startsAt ? 'starts-at-error' : undefined
+                  }
                   required
                 />
+                {fieldErrors.startsAt ? (
+                  <p id="starts-at-error" className="field-error">
+                    {fieldErrors.startsAt}
+                  </p>
+                ) : null}
               </div>
 
               <div className="field">
@@ -568,10 +703,19 @@ export function SessionEditor({
                   onChange={(event) =>
                     updateField('venueName', event.target.value)
                   }
+                  aria-invalid={Boolean(fieldErrors.venueName)}
+                  aria-describedby={
+                    fieldErrors.venueName ? 'venue-name-error' : undefined
+                  }
                   maxLength={120}
                   placeholder="Ex.: SEPTEM Paulista"
                   required
                 />
+                {fieldErrors.venueName ? (
+                  <p id="venue-name-error" className="field-error">
+                    {fieldErrors.venueName}
+                  </p>
+                ) : null}
               </div>
 
               <div className="field">
@@ -583,10 +727,19 @@ export function SessionEditor({
                   onChange={(event) =>
                     updateField('roomName', event.target.value)
                   }
+                  aria-invalid={Boolean(fieldErrors.roomName)}
+                  aria-describedby={
+                    fieldErrors.roomName ? 'room-name-error' : undefined
+                  }
                   maxLength={80}
                   placeholder="Ex.: Sala 2"
                   required
                 />
+                {fieldErrors.roomName ? (
+                  <p id="room-name-error" className="field-error">
+                    {fieldErrors.roomName}
+                  </p>
+                ) : null}
               </div>
 
               <div className="field field-wide">
@@ -598,10 +751,19 @@ export function SessionEditor({
                   onChange={(event) =>
                     updateField('address', event.target.value)
                   }
+                  aria-invalid={Boolean(fieldErrors.address)}
+                  aria-describedby={
+                    fieldErrors.address ? 'address-error' : undefined
+                  }
                   maxLength={240}
                   placeholder="Rua, número e cidade"
                   required
                 />
+                {fieldErrors.address ? (
+                  <p id="address-error" className="field-error">
+                    {fieldErrors.address}
+                  </p>
+                ) : null}
               </div>
 
               <div className="field">
@@ -615,9 +777,26 @@ export function SessionEditor({
                   max="100000"
                   step="0.01"
                   onChange={(event) => updateField('price', event.target.value)}
+                  aria-invalid={Boolean(fieldErrors.price)}
+                  aria-describedby={
+                    fieldErrors.price
+                      ? 'price-error'
+                      : pricePreview
+                        ? 'price-preview'
+                        : undefined
+                  }
                   placeholder="30,00"
                   required
                 />
+                {fieldErrors.price ? (
+                  <p id="price-error" className="field-error">
+                    {fieldErrors.price}
+                  </p>
+                ) : pricePreview ? (
+                  <small id="price-preview" className="field-hint">
+                    Valor exibido: {pricePreview}
+                  </small>
+                ) : null}
               </div>
             </div>
 
@@ -641,8 +820,17 @@ export function SessionEditor({
                       onChange={(event) =>
                         updateField('rows', event.target.value)
                       }
+                      aria-invalid={Boolean(fieldErrors.rows)}
+                      aria-describedby={
+                        fieldErrors.rows ? 'rows-error' : undefined
+                      }
                       required
                     />
+                    {fieldErrors.rows ? (
+                      <p id="rows-error" className="field-error">
+                        {fieldErrors.rows}
+                      </p>
+                    ) : null}
                   </div>
                   <span aria-hidden="true">×</span>
                   <div className="field">
@@ -657,8 +845,19 @@ export function SessionEditor({
                       onChange={(event) =>
                         updateField('seatsPerRow', event.target.value)
                       }
+                      aria-invalid={Boolean(fieldErrors.seatsPerRow)}
+                      aria-describedby={
+                        fieldErrors.seatsPerRow
+                          ? 'seats-per-row-error'
+                          : undefined
+                      }
                       required
                     />
+                    {fieldErrors.seatsPerRow ? (
+                      <p id="seats-per-row-error" className="field-error">
+                        {fieldErrors.seatsPerRow}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="capacity-summary" aria-live="polite">
                     <strong>{capacity}</strong>
@@ -683,10 +882,13 @@ export function SessionEditor({
                   <button
                     type="button"
                     className="publish-button"
-                    onClick={() => void handlePublish()}
+                    onClick={() => {
+                      setActionError(null)
+                      setIsPublishDialogOpen(true)
+                    }}
                     disabled={isBusy || isDirty}
                   >
-                    {isPublishing ? 'Publicando…' : 'Publicar sessão'}
+                    Publicar sessão
                   </button>
                 </div>
               ) : null}
@@ -694,6 +896,89 @@ export function SessionEditor({
           </form>
         </>
       )}
+
+      {session && !isPublished ? (
+        <dialog
+          ref={publishDialogRef}
+          className="organizer-publish-dialog"
+          aria-labelledby="publish-dialog-title"
+          aria-describedby="publish-dialog-description"
+          aria-busy={isPublishing}
+          onCancel={(event) => {
+            if (isPublishing) {
+              event.preventDefault()
+              return
+            }
+
+            setIsPublishDialogOpen(false)
+          }}
+          onClose={() => setIsPublishDialogOpen(false)}
+        >
+          <div className="publish-dialog-content">
+            <p className="section-kicker">Publicação definitiva</p>
+            <h2 id="publish-dialog-title">Publicar esta sessão?</h2>
+            <p id="publish-dialog-description">
+              Confira os dados principais antes de disponibilizar a sessão na
+              programação.
+            </p>
+
+            <dl className="publish-dialog-summary">
+              <div>
+                <dt>Filme</dt>
+                <dd>{session.movie.title}</dd>
+              </div>
+              <div>
+                <dt>Data e hora</dt>
+                <dd>{formatSessionDate(session.startsAt)}</dd>
+              </div>
+              <div>
+                <dt>Local</dt>
+                <dd>
+                  {session.venueName} · {session.roomName}
+                </dd>
+              </div>
+              <div>
+                <dt>Ingresso</dt>
+                <dd>{formatPrice(session.priceCents)}</dd>
+              </div>
+              <div>
+                <dt>Capacidade</dt>
+                <dd>{session.capacity} lugares</dd>
+              </div>
+            </dl>
+
+            <p className="publish-dialog-warning">
+              <strong>Após publicar,</strong> filme, horário, preço, local e
+              assentos ficam bloqueados.
+            </p>
+
+            {actionError ? (
+              <p className="message error-message" role="alert">
+                {actionError}
+              </p>
+            ) : null}
+
+            <div className="publish-dialog-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={isPublishing}
+                onClick={() => setIsPublishDialogOpen(false)}
+              >
+                Voltar e revisar
+              </button>
+              <button
+                type="button"
+                className="publish-button"
+                disabled={isPublishing}
+                onClick={() => void handlePublish()}
+              >
+                {isPublishing ? 'Publicando…' : 'Confirmar publicação'}
+              </button>
+            </div>
+          </div>
+        </dialog>
+      ) : null}
     </section>
   )
 }

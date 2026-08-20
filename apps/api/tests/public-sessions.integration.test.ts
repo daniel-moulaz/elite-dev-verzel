@@ -29,9 +29,12 @@ interface PublicSessionSummary {
   roomName: string
   priceCents: number
   movie: {
+    tmdbId: number
     title: string
     posterPath: string | null
+    backdropPath: string | null
     releaseDate: string | null
+    runtimeMinutes: number | null
   }
   capacity: number
 }
@@ -78,12 +81,14 @@ async function createTestSession({
   title = 'Filme de Teste M3',
   venueName = 'Cinema Público M3',
   seatCount = 3,
+  optionalMovieFields = 'present',
 }: {
   status?: SessionStatus
   startsAt?: Date
   title?: string
   venueName?: string
   seatCount?: number
+  optionalMovieFields?: 'present' | 'null'
 } = {}) {
   const session = await prisma.session.create({
     data: {
@@ -97,10 +102,15 @@ async function createTestSession({
       tmdbMovieId: 99_001,
       movieTitle: title,
       movieOverview: 'Sinopse usada somente pelos testes públicos do M3.',
-      moviePosterPath: '/poster-m3.jpg',
-      movieBackdropPath: '/backdrop-m3.jpg',
-      movieReleaseDate: new Date('2024-05-10T00:00:00.000Z'),
-      movieRuntimeMinutes: 112,
+      moviePosterPath:
+        optionalMovieFields === 'present' ? '/poster-m3.jpg' : null,
+      movieBackdropPath:
+        optionalMovieFields === 'present' ? '/backdrop-m3.jpg' : null,
+      movieReleaseDate:
+        optionalMovieFields === 'present'
+          ? new Date('2024-05-10T00:00:00.000Z')
+          : null,
+      movieRuntimeMinutes: optionalMovieFields === 'present' ? 112 : null,
       publishedAt:
         status === SessionStatus.PUBLISHED ? new Date() : null,
       seats: {
@@ -195,9 +205,12 @@ describe('GET /sessions', () => {
       priceCents: 2_500,
       capacity: 3,
       movie: {
+        tmdbId: 99_001,
         title: 'Sessão Próxima',
         posterPath: '/poster-m3.jpg',
+        backdropPath: '/backdrop-m3.jpg',
         releaseDate: '2024-05-10',
+        runtimeMinutes: 112,
       },
     })
     expect(testSessions[0]).not.toHaveProperty('organizerId')
@@ -226,6 +239,24 @@ describe('GET /sessions', () => {
 
     expect(ids).toEqual(expect.arrayContaining([titleMatch.id, venueMatch.id]))
     expect(ids).toHaveLength(2)
+  })
+
+  it('keeps optional public movie fields explicitly nullable', async () => {
+    const session = await createTestSession({ optionalMovieFields: 'null' })
+
+    const response = await app.inject({ method: 'GET', url: '/sessions' })
+    const summary = response
+      .json<{ sessions: PublicSessionSummary[] }>()
+      .sessions.find(({ id }) => id === session.id)
+
+    expect(response.statusCode).toBe(200)
+    expect(summary?.movie).toMatchObject({
+      tmdbId: 99_001,
+      posterPath: null,
+      backdropPath: null,
+      releaseDate: null,
+      runtimeMinutes: null,
+    })
   })
 
   it('rejects an empty explicit search query', async () => {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ApiError,
   createTicketShareLink,
@@ -7,10 +7,12 @@ import {
   type ShareLinkResult,
   type TicketDetail as TicketDetailData,
 } from '../../api'
+import { createCalendarFile, downloadCalendarFile } from '../../calendar'
 import { DigitalTicket } from './DigitalTicket'
+import { useToast } from '../common/toast'
 
 interface ShareFeedback {
-  type: 'success' | 'error'
+  type: 'error'
   message: string
 }
 
@@ -19,6 +21,8 @@ interface TicketDetailProps {
   ticketId: string
   onBack: () => void
 }
+
+type ShareAction = 'idle' | 'creating' | 'copying' | 'sharing' | 'revoking'
 
 function shareExpirationLabel(value: string): string {
   return new Intl.DateTimeFormat('pt-BR', {
@@ -32,13 +36,15 @@ export function TicketDetail({
   ticketId,
   onBack,
 }: TicketDetailProps) {
+  const { notify } = useToast()
   const [ticket, setTicket] = useState<TicketDetailData | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [errorMessage, setErrorMessage] = useState('')
   const [shareLink, setShareLink] = useState<ShareLinkResult | null>(null)
   const [shareFeedback, setShareFeedback] = useState<ShareFeedback | null>(null)
-  const [shareAction, setShareAction] = useState<'idle' | 'creating' | 'revoking'>('idle')
+  const [shareAction, setShareAction] = useState<ShareAction>('idle')
   const [reloadKey, setReloadKey] = useState(0)
+  const shareActionLockRef = useRef(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -70,8 +76,39 @@ export function TicketDetail({
     setReloadKey((value) => value + 1)
   }
 
+  function beginShareAction(action: Exclude<ShareAction, 'idle'>): boolean {
+    if (shareActionLockRef.current) {
+      return false
+    }
+
+    shareActionLockRef.current = true
+    setShareAction(action)
+    return true
+  }
+
+  function finishShareAction() {
+    shareActionLockRef.current = false
+    setShareAction('idle')
+  }
+
   async function generateShareLink() {
-    setShareAction('creating')
+    if (shareActionLockRef.current) {
+      return
+    }
+
+    if (
+      (ticket?.shareLink || shareLink) &&
+      !window.confirm(
+        'Gerar um novo link invalida imediatamente o compartilhamento anterior. Deseja continuar?',
+      )
+    ) {
+      return
+    }
+
+    if (!beginShareAction('creating')) {
+      return
+    }
+
     setShareFeedback(null)
 
     try {
@@ -82,10 +119,7 @@ export function TicketDetail({
           ? { ...current, shareLink: { expiresAt: result.expiresAt } }
           : current,
       )
-      setShareFeedback({
-        type: 'success',
-        message: 'Link criado. Gerar outro link invalida este imediatamente.',
-      })
+      notify('Link de compartilhamento criado.', 'success')
     } catch (error) {
       setShareFeedback({
         type: 'error',
@@ -94,39 +128,88 @@ export function TicketDetail({
           : 'Não foi possível gerar o link.',
       })
     } finally {
-      setShareAction('idle')
+      finishShareAction()
     }
   }
 
   async function copyShareLink() {
-    if (!shareLink) {
+    if (!shareLink || !beginShareAction('copying')) {
       return
     }
 
-    if (!navigator.clipboard) {
-      setShareFeedback({
-        type: 'success',
-        message: 'Copie o endereço exibido abaixo.',
-      })
-      return
-    }
+    setShareFeedback(null)
 
     try {
+      if (!navigator.clipboard) {
+        notify('Selecione o endereço para copiá-lo manualmente.', 'info')
+        return
+      }
+
       await navigator.clipboard.writeText(shareLink.url)
-      setShareFeedback({
-        type: 'success',
-        message: 'Link copiado para a área de transferência.',
-      })
+      notify('Link copiado.', 'success')
     } catch {
       setShareFeedback({
         type: 'error',
         message: 'Não foi possível copiar automaticamente. Copie o endereço abaixo.',
       })
+    } finally {
+      finishShareAction()
+    }
+  }
+
+  async function shareTicket() {
+    if (!shareLink || shareActionLockRef.current) {
+      return
+    }
+
+    setShareFeedback(null)
+
+    if (typeof navigator.share !== 'function') {
+      await copyShareLink()
+      return
+    }
+
+    if (!beginShareAction('sharing')) {
+      return
+    }
+
+    try {
+      await navigator.share({
+        title: `Ingresso SEPTEM — ${ticket?.session.movie.title ?? 'cinema'}`,
+        text: 'Acesse este ingresso compartilhado da SEPTEM.',
+        url: shareLink.url,
+      })
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return
+      }
+
+      setShareFeedback({
+        type: 'error',
+        message: 'Não foi possível abrir o compartilhamento do dispositivo.',
+      })
+    } finally {
+      finishShareAction()
     }
   }
 
   async function revokeShareLink() {
-    setShareAction('revoking')
+    if (shareActionLockRef.current) {
+      return
+    }
+
+    if (
+      !window.confirm(
+        'Revogar este link impede imediatamente novos acessos por ele. Deseja continuar?',
+      )
+    ) {
+      return
+    }
+
+    if (!beginShareAction('revoking')) {
+      return
+    }
+
     setShareFeedback(null)
 
     try {
@@ -135,10 +218,7 @@ export function TicketDetail({
       setTicket((current) =>
         current ? { ...current, shareLink: null } : current,
       )
-      setShareFeedback({
-        type: 'success',
-        message: 'Link revogado. Ele não pode mais abrir o ingresso.',
-      })
+      notify('Link revogado.', 'success')
     } catch (error) {
       setShareFeedback({
         type: 'error',
@@ -147,16 +227,39 @@ export function TicketDetail({
           : 'Não foi possível revogar o link.',
       })
     } finally {
-      setShareAction('idle')
+      finishShareAction()
+    }
+  }
+
+  function addTicketToCalendar() {
+    if (!ticket) {
+      return
+    }
+
+    try {
+      downloadCalendarFile(
+        createCalendarFile({
+          id: ticket.session.id,
+          movieTitle: ticket.session.movie.title,
+          startsAt: ticket.session.startsAt,
+          venueName: ticket.session.venueName,
+          roomName: ticket.session.roomName,
+          address: ticket.session.address,
+        }),
+      )
+      notify('Arquivo da agenda preparado.', 'success')
+    } catch {
+      notify('Não foi possível preparar o arquivo da agenda.', 'error')
     }
   }
 
   if (status === 'loading') {
     return (
-      <div className="public-content">
-        <div className="content-state public-state" aria-busy="true" aria-live="polite">
+      <div className="public-content ticket-detail-loading">
+        <div className="ticket-skeleton" aria-busy="true" aria-live="polite">
           <p className="section-kicker">Ingresso digital</p>
-          <h1>Preparando seu bilhete…</h1>
+          <h1 className="visually-hidden">Preparando seu bilhete…</h1>
+          <div aria-hidden="true"><span /><span /><span /></div>
         </div>
       </div>
     )
@@ -182,9 +285,31 @@ export function TicketDetail({
 
   return (
     <div className="public-content ticket-detail-page">
-      <button type="button" className="back-button" onClick={onBack}>
-        <span aria-hidden="true">←</span> Meus ingressos
-      </button>
+      <div className="ticket-detail-toolbar">
+        <button type="button" className="back-button" onClick={onBack}>
+          <span aria-hidden="true">←</span> Meus ingressos
+        </button>
+        <div
+          className="ticket-utility-actions"
+          role="group"
+          aria-label="Ações do ingresso"
+        >
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={addTicketToCalendar}
+          >
+            Adicionar à agenda
+          </button>
+          <button
+            type="button"
+            className="secondary-button ticket-print-button"
+            onClick={() => window.print()}
+          >
+            Imprimir / salvar
+          </button>
+        </div>
+      </div>
 
       <DigitalTicket
         ticket={{
@@ -211,9 +336,44 @@ export function TicketDetail({
             <label htmlFor="share-url">Link compartilhável</label>
             <div>
               <input id="share-url" readOnly value={shareLink.url} />
-              <button type="button" onClick={() => void copyShareLink()}>
-                Copiar
+              <button
+                type="button"
+                onClick={() => void copyShareLink()}
+                disabled={shareAction !== 'idle'}
+              >
+                {shareAction === 'copying' ? 'Copiando…' : 'Copiar'}
               </button>
+            </div>
+            <div className="share-link-actions">
+              {typeof navigator.share === 'function' ? (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void shareTicket()}
+                  disabled={shareAction !== 'idle'}
+                >
+                  {shareAction === 'sharing'
+                    ? 'Compartilhando…'
+                    : 'Compartilhar'}
+                </button>
+              ) : null}
+              {shareAction === 'idle' ? (
+                <a
+                  className="secondary-link-button"
+                  href={shareLink.url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Abrir link
+                </a>
+              ) : (
+                <span
+                  className="secondary-link-button is-disabled"
+                  aria-disabled="true"
+                >
+                  Abrir link
+                </span>
+              )}
             </div>
             <small>Expira em {shareExpirationLabel(shareLink.expiresAt)}.</small>
           </div>
@@ -227,7 +387,7 @@ export function TicketDetail({
         {shareFeedback ? (
           <p
             className={`message share-message share-${shareFeedback.type}`}
-            role={shareFeedback.type === 'error' ? 'alert' : 'status'}
+            role="alert"
           >
             {shareFeedback.message}
           </p>

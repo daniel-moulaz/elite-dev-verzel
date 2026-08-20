@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ApiError,
   createReservation,
@@ -9,6 +9,7 @@ import {
   type Reservation,
   type SessionSeat,
 } from '../../api'
+import { createCalendarFile, downloadCalendarFile } from '../../calendar'
 import {
   formatSessionDay,
   formatPrice,
@@ -18,8 +19,26 @@ import {
   tmdbPosterUrl,
 } from '../organizer/formatters'
 import { PosterImage } from '../common/PosterImage'
+import { useToast } from '../common/toast'
 
 const maximumSeatsPerReservation = 6
+const seatAvailabilityPollingMilliseconds = 8_000
+
+function joinSeatLabels(labels: string[]): string {
+  if (labels.length <= 1) {
+    return labels[0] ?? ''
+  }
+
+  return `${labels.slice(0, -1).join(', ')} e ${labels.at(-1)}`
+}
+
+function unavailableSeatsMessage(labels: string[]): string {
+  const joinedLabels = joinSeatLabels(labels)
+
+  return labels.length === 1
+    ? `${joinedLabels} acabou de ficar indisponível.`
+    : `${joinedLabels} acabaram de ficar indisponíveis.`
+}
 
 interface SessionDetailProps {
   sessionId: string
@@ -54,6 +73,7 @@ export function SessionDetail({
   onRequireLogin,
   onReservationCreated,
 }: SessionDetailProps) {
+  const { notify } = useToast()
   const [session, setSession] = useState<PublicSessionDetail | null>(null)
   const [seats, setSeats] = useState<SessionSeat[]>([])
   const [selectedSeatIds, setSelectedSeatIds] = useState<Set<string>>(
@@ -67,6 +87,21 @@ export function SessionDetail({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   const [failedBackdrop, setFailedBackdrop] = useState<string | null>(null)
+  const seatsRef = useRef<SessionSeat[]>([])
+  const selectedSeatIdsRef = useRef<Set<string>>(new Set())
+  const refreshControllerRef = useRef<AbortController | null>(null)
+  const refreshInFlightRef = useRef(false)
+  const reservationSubmissionRef = useRef(false)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+
+    return () => {
+      mountedRef.current = false
+      refreshControllerRef.current?.abort()
+    }
+  }, [])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -78,6 +113,8 @@ export function SessionDetail({
       .then(([sessionResult, seatResult]) => {
         setSession(sessionResult)
         setSeats(seatResult)
+        seatsRef.current = seatResult
+        setMessage(null)
         setStatus('ready')
       })
       .catch((error: unknown) => {
@@ -95,6 +132,14 @@ export function SessionDetail({
 
     return () => controller.abort()
   }, [reloadKey, sessionId])
+
+  useEffect(() => {
+    seatsRef.current = seats
+  }, [seats])
+
+  useEffect(() => {
+    selectedSeatIdsRef.current = selectedSeatIds
+  }, [selectedSeatIds])
 
   const rows = useMemo(() => groupSeatsByRow(seats), [seats])
   const selectedSeats = useMemo(
@@ -129,10 +174,12 @@ export function SessionDetail({
 
       if (next.has(seat.id)) {
         next.delete(seat.id)
+        selectedSeatIdsRef.current = next
         return next
       }
 
       next.add(seat.id)
+      selectedSeatIdsRef.current = next
       return next
     })
   }
@@ -140,48 +187,172 @@ export function SessionDetail({
   function retrySession() {
     setStatus('loading')
     setMessage(null)
-    setSelectedSeatIds(new Set())
+    const emptySelection = new Set<string>()
+    selectedSeatIdsRef.current = emptySelection
+    setSelectedSeatIds(emptySelection)
     setReloadKey((value) => value + 1)
   }
 
-  async function refreshAvailability(clearCurrentMessage = true) {
-    setIsRefreshing(true)
-    if (clearCurrentMessage) {
-      setMessage(null)
-    }
+  const refreshAvailability = useCallback(
+    async ({
+      source = 'manual',
+      clearCurrentMessage = true,
+      notifyLostSeats = true,
+    }: {
+      source?: 'manual' | 'background'
+      clearCurrentMessage?: boolean
+      notifyLostSeats?: boolean
+    } = {}) => {
+      if (refreshInFlightRef.current) {
+        return
+      }
 
-    try {
-      const refreshedSeats = await getSessionSeats(sessionId)
-      const availableIds = new Set(
-        refreshedSeats
-          .filter((seat) => seat.status === 'AVAILABLE')
-          .map((seat) => seat.id),
-      )
+      const controller = new AbortController()
+      refreshInFlightRef.current = true
+      refreshControllerRef.current = controller
 
-      setSeats(refreshedSeats)
-      setSelectedSeatIds((current) => {
-        const next = new Set<string>()
+      if (source === 'manual') {
+        setIsRefreshing(true)
+        if (clearCurrentMessage) {
+          setMessage(null)
+        }
+      }
 
-        for (const seatId of current) {
-          if (availableIds.has(seatId)) {
-            next.add(seatId)
-          }
+      try {
+        const refreshedSeats = await getSessionSeats(
+          sessionId,
+          controller.signal,
+        )
+        const currentSelection = selectedSeatIdsRef.current
+        const previousSeats = seatsRef.current
+        const availableIds = new Set(
+          refreshedSeats
+            .filter((seat) => seat.status === 'AVAILABLE')
+            .map((seat) => seat.id),
+        )
+        const unavailableSelectedIds = Array.from(currentSelection).filter(
+          (seatId) => !availableIds.has(seatId),
+        )
+
+        if (!mountedRef.current || controller.signal.aborted) {
+          return
         }
 
-        return next
-      })
-    } catch (error) {
-      setMessage(
-        error instanceof ApiError
-          ? error.message
-          : 'Não foi possível atualizar os lugares.',
-      )
-    } finally {
-      setIsRefreshing(false)
+        seatsRef.current = refreshedSeats
+        setSeats(refreshedSeats)
+
+        if (unavailableSelectedIds.length > 0) {
+          const labelsById = new Map(
+            [...previousSeats, ...refreshedSeats].map((seat) => [
+              seat.id,
+              seat.label,
+            ]),
+          )
+          const next = new Set<string>()
+
+          for (const seatId of currentSelection) {
+            if (availableIds.has(seatId)) {
+              next.add(seatId)
+            }
+          }
+
+          selectedSeatIdsRef.current = next
+          setSelectedSeatIds(next)
+
+          if (notifyLostSeats) {
+            const lostLabels = unavailableSelectedIds.map(
+              (seatId) => labelsById.get(seatId) ?? 'Um lugar selecionado',
+            )
+            notify(unavailableSeatsMessage(lostLabels), 'info')
+          }
+        }
+      } catch (error) {
+        if (
+          source === 'manual' &&
+          mountedRef.current &&
+          !controller.signal.aborted
+        ) {
+          setMessage(
+            error instanceof ApiError
+              ? error.message
+              : 'Não foi possível atualizar os lugares.',
+          )
+        }
+      } finally {
+        if (refreshControllerRef.current === controller) {
+          refreshControllerRef.current = null
+          refreshInFlightRef.current = false
+        }
+
+        if (source === 'manual' && mountedRef.current) {
+          setIsRefreshing(false)
+        }
+      }
+    },
+    [notify, sessionId],
+  )
+
+  useEffect(() => {
+    if (status !== 'ready' || isSubmitting) {
+      return
     }
-  }
+
+    let timerId: number | undefined
+    let stopped = false
+
+    function clearTimer() {
+      if (timerId !== undefined) {
+        window.clearTimeout(timerId)
+        timerId = undefined
+      }
+    }
+
+    function scheduleNextRefresh() {
+      clearTimer()
+
+      if (!stopped && !document.hidden) {
+        timerId = window.setTimeout(() => {
+          void pollAvailability()
+        }, seatAvailabilityPollingMilliseconds)
+      }
+    }
+
+    async function pollAvailability() {
+      if (stopped || document.hidden) {
+        return
+      }
+
+      await refreshAvailability({ source: 'background' })
+      scheduleNextRefresh()
+    }
+
+    function handleVisibilityChange() {
+      clearTimer()
+
+      if (document.hidden) {
+        refreshControllerRef.current?.abort()
+        return
+      }
+
+      void pollAvailability()
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    scheduleNextRefresh()
+
+    return () => {
+      stopped = true
+      clearTimer()
+      refreshControllerRef.current?.abort()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [isSubmitting, refreshAvailability, status])
 
   async function handleReservation() {
+    if (reservationSubmissionRef.current) {
+      return
+    }
+
     if (!user || !accessToken) {
       onRequireLogin()
       return
@@ -197,6 +368,10 @@ export function SessionDetail({
       return
     }
 
+    reservationSubmissionRef.current = true
+    refreshControllerRef.current?.abort()
+    refreshControllerRef.current = null
+    refreshInFlightRef.current = false
     setIsSubmitting(true)
     setMessage(null)
 
@@ -216,7 +391,10 @@ export function SessionDetail({
         setMessage(
           'Um ou mais lugares acabaram de ficar indisponíveis. Atualizamos o mapa para você escolher novamente.',
         )
-        await refreshAvailability(false)
+        await refreshAvailability({
+          clearCurrentMessage: false,
+          notifyLostSeats: false,
+        })
       } else {
         setMessage(
           error instanceof ApiError
@@ -225,7 +403,78 @@ export function SessionDetail({
         )
       }
     } finally {
-      setIsSubmitting(false)
+      reservationSubmissionRef.current = false
+      if (mountedRef.current) {
+        setIsSubmitting(false)
+      }
+    }
+  }
+
+  async function shareSession() {
+    if (!session) {
+      return
+    }
+
+    const sessionUrl = new URL(
+      `/sessions/${encodeURIComponent(session.id)}`,
+      window.location.origin,
+    ).toString()
+
+    async function copySessionLink() {
+      if (!navigator.clipboard) {
+        notify('Copie o endereço desta página no navegador.', 'info')
+        return
+      }
+
+      try {
+        await navigator.clipboard.writeText(sessionUrl)
+        notify('Link da sessão copiado.', 'success')
+      } catch {
+        notify('Não foi possível copiar o link da sessão.', 'error')
+      }
+    }
+
+    if (typeof navigator.share === 'function') {
+      try {
+        await navigator.share({
+          title: `SEPTEM — ${session.movie.title}`,
+          text: `${formatSessionDay(session.startsAt)}, às ${formatSessionTime(session.startsAt)} · ${session.venueName}, ${session.roomName}`,
+          url: sessionUrl,
+        })
+        return
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return
+        }
+
+        await copySessionLink()
+        return
+      }
+    }
+
+    await copySessionLink()
+  }
+
+  function addSessionToCalendar() {
+    if (!session) {
+      return
+    }
+
+    try {
+      downloadCalendarFile(
+        createCalendarFile({
+          id: session.id,
+          movieTitle: session.movie.title,
+          startsAt: session.startsAt,
+          runtimeMinutes: session.movie.runtimeMinutes,
+          venueName: session.venueName,
+          roomName: session.roomName,
+          address: session.address,
+        }),
+      )
+      notify('Arquivo da agenda preparado.', 'success')
+    } catch {
+      notify('Não foi possível preparar o arquivo da agenda.', 'error')
     }
   }
 
@@ -285,12 +534,15 @@ export function SessionDetail({
             src={posterUrl}
             title={session.movie.title}
             loading="eager"
+            variant="hero"
           />
           <div className="session-title-block">
             <p className="section-kicker">Em cartaz</p>
             <h1>{session.movie.title}</h1>
             <p className="detail-movie-meta">
-              <span>{movieYear(session.movie.releaseDate)}</span>
+              {session.movie.releaseDate ? (
+                <span>{movieYear(session.movie.releaseDate)}</span>
+              ) : null}
               {session.movie.runtimeMinutes ? (
                 <span>{session.movie.runtimeMinutes} min</span>
               ) : null}
@@ -328,6 +580,27 @@ export function SessionDetail({
         </div>
       </article>
 
+      <div
+        className="session-utility-actions"
+        role="group"
+        aria-label="Ações desta sessão"
+      >
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={() => void shareSession()}
+        >
+          Compartilhar sessão
+        </button>
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={addSessionToCalendar}
+        >
+          Adicionar à agenda
+        </button>
+      </div>
+
       <section className="seat-selection" aria-labelledby="seat-map-heading">
         <div className="seat-map-heading">
           <div>
@@ -342,11 +615,17 @@ export function SessionDetail({
             type="button"
             className="secondary-button"
             onClick={() => void refreshAvailability()}
-            disabled={isRefreshing}
+            disabled={isRefreshing || isSubmitting}
           >
             {isRefreshing ? 'Atualizando…' : 'Atualizar lugares'}
           </button>
         </div>
+
+        {message ? (
+          <p className="message error-message selection-feedback" role="alert">
+            {message}
+          </p>
+        ) : null}
 
         <div className="seat-workspace">
           <div className="seat-map-panel">
@@ -393,6 +672,7 @@ export function SessionDetail({
                             onClick={() => toggleSeat(seat)}
                             disabled={!isAvailable}
                             aria-label={`Assento ${seat.label}, ${stateLabel}`}
+                            title={`Assento ${seat.label}, ${stateLabel}`}
                             aria-pressed={isAvailable ? isSelected : undefined}
                           >
                             <span className="seat-shape" aria-hidden="true">
@@ -436,16 +716,12 @@ export function SessionDetail({
               <strong>{formatPrice(estimatedTotal)}</strong>
             </div>
 
-            {message ? (
-              <p className="message error-message" role="alert">
-                {message}
-              </p>
-            ) : null}
-
             <button
               type="button"
               onClick={() => void handleReservation()}
-              disabled={selectedSeatIds.size === 0 || isSubmitting}
+              disabled={
+                selectedSeatIds.size === 0 || isSubmitting || isRefreshing
+              }
             >
               {isSubmitting ? 'Reservando…' : 'Reservar por 10 minutos'}
             </button>
@@ -454,6 +730,33 @@ export function SessionDetail({
             </p>
           </aside>
         </div>
+
+        <aside
+          className={`mobile-booking-bar ${selectedSeats.length > 0 ? 'has-selection' : 'is-empty'}`}
+          aria-label="Resumo da seleção e reserva"
+        >
+          <div className="mobile-booking-summary">
+            <strong>
+              {selectedSeats.length > 0
+                ? selectedSeats.map((seat) => seat.label).join(', ')
+                : 'Selecione seus lugares'}
+            </strong>
+            <span>
+              {selectedSeats.length}{' '}
+              {selectedSeats.length === 1 ? 'lugar' : 'lugares'} ·{' '}
+              {formatPrice(estimatedTotal)}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleReservation()}
+            disabled={
+              selectedSeatIds.size === 0 || isSubmitting || isRefreshing
+            }
+          >
+            {isSubmitting ? 'Reservando…' : 'Reservar por 10 minutos'}
+          </button>
+        </aside>
       </section>
     </div>
   )

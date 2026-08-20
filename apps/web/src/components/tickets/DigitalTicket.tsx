@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react'
+import { QRCodeSVG } from 'qrcode.react'
 import type { TicketStatus } from '../../api'
 import {
   formatSessionDate,
@@ -6,10 +6,7 @@ import {
 } from '../organizer/formatters'
 import { BrandLockup } from '../common/BrandLockup'
 import { PosterImage } from '../common/PosterImage'
-
-const QRCodeSVG = lazy(() =>
-  import('qrcode.react').then((module) => ({ default: module.QRCodeSVG })),
-)
+import { useToast } from '../common/toast'
 
 export interface DigitalTicketData {
   status: TicketStatus
@@ -34,8 +31,23 @@ interface DigitalTicketProps {
 }
 
 export function DigitalTicket({ ticket, shared = false }: DigitalTicketProps) {
+  const { notify } = useToast()
   const posterUrl = tmdbPosterUrl(ticket.session.movie.posterPath)
   const statusLabel = ticket.status === 'VALID' ? 'Válido' : 'Utilizado'
+
+  async function copyManualCode() {
+    if (!navigator.clipboard) {
+      notify('Selecione o código para copiá-lo manualmente.', 'info')
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(ticket.manualCode)
+      notify('Código copiado.', 'success')
+    } catch {
+      notify('Não foi possível copiar o código automaticamente.', 'error')
+    }
+  }
 
   return (
     <article
@@ -52,20 +64,26 @@ export function DigitalTicket({ ticket, shared = false }: DigitalTicketProps) {
             src={posterUrl}
             title={ticket.session.movie.title}
             className="ticket-poster"
+            variant="ticket"
           />
-          <div>
-            <p className="section-kicker">
-              {shared ? 'Ingresso compartilhado' : 'Seu ingresso digital'}
-            </p>
+          <div className="ticket-movie-copy">
             <h1>{ticket.session.movie.title}</h1>
             <span className="ticket-status-badge">{statusLabel}</span>
           </div>
         </div>
 
         <dl className="ticket-facts">
+          <div className="ticket-seat-fact">
+            <dt>Assento</dt>
+            <dd>{ticket.seatLabel}</dd>
+          </div>
           <div>
             <dt>Data e horário</dt>
-            <dd>{formatSessionDate(ticket.session.startsAt)}</dd>
+            <dd>
+              <time dateTime={ticket.session.startsAt}>
+                {formatSessionDate(ticket.session.startsAt)}
+              </time>
+            </dd>
           </div>
           <div>
             <dt>Cinema</dt>
@@ -74,10 +92,6 @@ export function DigitalTicket({ ticket, shared = false }: DigitalTicketProps) {
           <div>
             <dt>Sala</dt>
             <dd>{ticket.session.roomName}</dd>
-          </div>
-          <div className="ticket-seat-fact">
-            <dt>Assento</dt>
-            <dd>{ticket.seatLabel}</dd>
           </div>
           <div className="ticket-address-fact">
             <dt>Endereço</dt>
@@ -92,28 +106,36 @@ export function DigitalTicket({ ticket, shared = false }: DigitalTicketProps) {
 
       <div className="ticket-admission">
         <span className="ticket-admission-label">Apresente na portaria</span>
+        <span className="ticket-admission-status">{statusLabel}</span>
         <div
           className="ticket-qr"
           role="img"
           aria-label={`QR Code do ingresso, assento ${ticket.seatLabel}`}
         >
-          <Suspense fallback={<span className="qr-loading">Gerando QR…</span>}>
-            <QRCodeSVG
-              value={ticket.qrToken}
-              size={256}
-              level="M"
-              marginSize={4}
-              bgColor="#ffffff"
-              fgColor="#111111"
-              title={`Ingresso ${ticket.seatLabel}`}
-            />
-          </Suspense>
+          <QRCodeSVG
+            value={ticket.qrToken}
+            size={256}
+            level="M"
+            marginSize={4}
+            bgColor="#ffffff"
+            fgColor="#111111"
+            title={`Ingresso ${ticket.seatLabel}`}
+          />
         </div>
-        <p>Apresente o QR Code ou informe o código manual na portaria.</p>
         <span className="manual-code-label">Código manual</span>
-        <strong className="manual-code" aria-label={`Código manual ${ticket.manualCode}`}>
+        <strong
+          className="manual-code"
+          aria-label={`Código manual ${ticket.manualCode}`}
+        >
           {ticket.manualCode}
         </strong>
+        <button
+          type="button"
+          className="ticket-copy-code"
+          onClick={() => void copyManualCode()}
+        >
+          Copiar código
+        </button>
       </div>
     </article>
   )

@@ -11,21 +11,92 @@ import {
 import { generateManualCode } from '../src/modules/tickets/ticket-crypto.js'
 import * as argon2 from 'argon2'
 import { config } from 'dotenv'
-import { DEMO_PASSWORD, DEMO_USERS } from './seed-data.js'
+import {
+  DEMO_PASSWORD,
+  DEMO_SESSION_IDS,
+  DEMO_TICKET_ID,
+  DEMO_USERS,
+} from './seed-data.js'
 
 config({
   path: fileURLToPath(new URL('../../../.env', import.meta.url)),
   quiet: true,
 })
 
-const DEMO_SESSION_ID = '11111111-1111-4111-8111-111111111111'
-const DEMO_TICKET_SESSION_ID = '22222222-2222-4222-8222-222222222222'
 const DEMO_RESERVATION_ID = '33333333-3333-4333-8333-333333333333'
 const DEMO_PAYMENT_ID = '44444444-4444-4444-8444-444444444444'
-const DEMO_TICKET_ID = '55555555-5555-4555-8555-555555555555'
 
-function futureDate(hoursFromNow: number) {
-  return new Date(Date.now() + hoursFromNow * 60 * 60 * 1_000)
+const SAO_PAULO_OFFSET = '-03:00'
+const saoPauloCalendar = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Sao_Paulo',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+const movieSnapshots = {
+  interstellar: {
+    tmdbMovieId: 157336,
+    movieTitle: 'Interestelar',
+    movieOverview:
+      'Uma equipe atravessa o espaço em busca de um novo lar para a humanidade.',
+    moviePosterPath: '/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg',
+    movieBackdropPath: '/xJHokMbljvjADYdit5fK5VQsXEG.jpg',
+    movieReleaseDate: new Date('2014-11-05T00:00:00.000Z'),
+    movieRuntimeMinutes: 169,
+  },
+  matrix: {
+    tmdbMovieId: 603,
+    movieTitle: 'Matrix',
+    movieOverview:
+      'Um programador descobre que a realidade ao seu redor esconde um sistema artificial.',
+    moviePosterPath: '/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg',
+    movieBackdropPath: '/icmmSD4vTTDKOq2vvdulafOGw93.jpg',
+    movieReleaseDate: new Date('1999-03-30T00:00:00.000Z'),
+    movieRuntimeMinutes: 136,
+  },
+  godfather: {
+    tmdbMovieId: 238,
+    movieTitle: 'O Poderoso Chefão',
+    movieOverview:
+      'A família Corleone enfrenta uma disputa de poder que transforma o destino de seu filho mais novo.',
+    moviePosterPath: '/3bhkrj58Vtu7enYsRolD1fZdja1.jpg',
+    movieBackdropPath: '/tmU7GeKVybMWFButWEGl2M4GeiP.jpg',
+    movieReleaseDate: new Date('1972-03-24T00:00:00.000Z'),
+    movieRuntimeMinutes: 175,
+  },
+} as const
+
+function saoPauloDatePart(
+  value: Date,
+  type: Intl.DateTimeFormatPartTypes,
+) {
+  const part = saoPauloCalendar
+    .formatToParts(value)
+    .find((candidate) => candidate.type === type)?.value
+
+  if (!part) {
+    throw new Error('Não foi possível calcular as datas da programação demo.')
+  }
+
+  return Number(part)
+}
+
+function demoStartsAt(
+  seedNow: Date,
+  dayOffset: number,
+  localTime: string,
+) {
+  const calendarDate = new Date(
+    Date.UTC(
+      saoPauloDatePart(seedNow, 'year'),
+      saoPauloDatePart(seedNow, 'month') - 1,
+      saoPauloDatePart(seedNow, 'day') + dayOffset,
+    ),
+  )
+  const date = calendarDate.toISOString().slice(0, 10)
+
+  return new Date(`${date}T${localTime}:00${SAO_PAULO_OFFSET}`)
 }
 
 function seatLayout(rows: number, seatsPerRow: number) {
@@ -82,93 +153,158 @@ async function seed() {
       throw new Error('Não foi possível localizar as contas de demonstração.')
     }
 
-    const firstSessionStartsAt = futureDate(48)
-    const secondSessionStartsAt = futureDate(72)
+    const seedNow = new Date()
+    const publishedAt = seedNow
+    const demoSessions = [
+      {
+        id: DEMO_SESSION_IDS.matrixTicket,
+        status: SessionStatus.PUBLISHED,
+        startsAt: demoStartsAt(seedNow, 2, '15:30'),
+        venueName: 'SEPTEM Paulista',
+        roomName: 'Sala Marfim',
+        address: 'Avenida Paulista, 1000 — São Paulo, SP',
+        priceCents: 2600,
+        rows: 4,
+        seatsPerRow: 8,
+        movie: movieSnapshots.matrix,
+      },
+      {
+        id: DEMO_SESSION_IDS.interstellarEarly,
+        status: SessionStatus.PUBLISHED,
+        startsAt: demoStartsAt(seedNow, 2, '16:00'),
+        venueName: 'SEPTEM Paulista',
+        roomName: 'Sala Cobre',
+        address: 'Avenida Paulista, 1000 — São Paulo, SP',
+        priceCents: 3000,
+        rows: 6,
+        seatsPerRow: 10,
+        movie: movieSnapshots.interstellar,
+      },
+      {
+        id: DEMO_SESSION_IDS.matrixMiddle,
+        status: SessionStatus.PUBLISHED,
+        startsAt: demoStartsAt(seedNow, 2, '18:30'),
+        venueName: 'SEPTEM Paulista',
+        roomName: 'Sala Marfim',
+        address: 'Avenida Paulista, 1000 — São Paulo, SP',
+        priceCents: 2800,
+        rows: 4,
+        seatsPerRow: 8,
+        movie: movieSnapshots.matrix,
+      },
+      {
+        id: DEMO_SESSION_IDS.interstellarLate,
+        status: SessionStatus.PUBLISHED,
+        startsAt: demoStartsAt(seedNow, 2, '20:00'),
+        venueName: 'SEPTEM Paulista',
+        roomName: 'Sala Cobre',
+        address: 'Avenida Paulista, 1000 — São Paulo, SP',
+        priceCents: 3200,
+        rows: 6,
+        seatsPerRow: 10,
+        movie: movieSnapshots.interstellar,
+      },
+      {
+        id: DEMO_SESSION_IDS.matrixLate,
+        status: SessionStatus.PUBLISHED,
+        startsAt: demoStartsAt(seedNow, 2, '21:30'),
+        venueName: 'SEPTEM Paulista',
+        roomName: 'Sala Marfim',
+        address: 'Avenida Paulista, 1000 — São Paulo, SP',
+        priceCents: 2800,
+        rows: 4,
+        seatsPerRow: 8,
+        movie: movieSnapshots.matrix,
+      },
+      {
+        id: DEMO_SESSION_IDS.godfatherEarly,
+        status: SessionStatus.PUBLISHED,
+        startsAt: demoStartsAt(seedNow, 3, '16:30'),
+        venueName: 'SEPTEM Pinheiros',
+        roomName: 'Sala Rubi',
+        address: 'Rua dos Pinheiros, 1000 — São Paulo, SP',
+        priceCents: 2900,
+        rows: 5,
+        seatsPerRow: 8,
+        movie: movieSnapshots.godfather,
+      },
+      {
+        id: DEMO_SESSION_IDS.interstellarSecondDay,
+        status: SessionStatus.PUBLISHED,
+        startsAt: demoStartsAt(seedNow, 3, '19:30'),
+        venueName: 'SEPTEM Paulista',
+        roomName: 'Sala Cobre',
+        address: 'Avenida Paulista, 1000 — São Paulo, SP',
+        priceCents: 3000,
+        rows: 6,
+        seatsPerRow: 10,
+        movie: movieSnapshots.interstellar,
+      },
+      {
+        id: DEMO_SESSION_IDS.godfatherLate,
+        status: SessionStatus.PUBLISHED,
+        startsAt: demoStartsAt(seedNow, 3, '20:00'),
+        venueName: 'SEPTEM Pinheiros',
+        roomName: 'Sala Rubi',
+        address: 'Rua dos Pinheiros, 1000 — São Paulo, SP',
+        priceCents: 3100,
+        rows: 5,
+        seatsPerRow: 8,
+        movie: movieSnapshots.godfather,
+      },
+      {
+        id: DEMO_SESSION_IDS.godfatherDraft,
+        status: SessionStatus.DRAFT,
+        startsAt: demoStartsAt(seedNow, 3, '14:00'),
+        venueName: 'SEPTEM Pinheiros',
+        roomName: 'Sala Horizonte',
+        address: 'Rua dos Pinheiros, 1000 — São Paulo, SP',
+        priceCents: 2700,
+        rows: 5,
+        seatsPerRow: 8,
+        movie: movieSnapshots.godfather,
+      },
+    ] as const
 
     await prisma.$transaction(async (transaction) => {
-      await transaction.session.upsert({
-        where: { id: DEMO_SESSION_ID },
-        create: {
-          id: DEMO_SESSION_ID,
+      for (const demoSession of demoSessions) {
+        const sessionData = {
           organizerId: organizer.id,
-          status: SessionStatus.PUBLISHED,
-          startsAt: firstSessionStartsAt,
-          venueName: 'SEPTEM Paulista',
-          roomName: 'Sala Cobre',
-          address: 'Avenida Paulista, 1000 — São Paulo, SP',
-          priceCents: 3000,
-          tmdbMovieId: 157336,
-          movieTitle: 'Interestelar',
-          movieOverview:
-            'Uma equipe atravessa o espaço em busca de um novo lar para a humanidade.',
-          moviePosterPath: '/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg',
-          movieBackdropPath: '/xJHokMbljvjADYdit5fK5VQsXEG.jpg',
-          movieReleaseDate: new Date('2014-11-05T00:00:00.000Z'),
-          movieRuntimeMinutes: 169,
-          publishedAt: new Date(),
-        },
-        update: {
-          startsAt: firstSessionStartsAt,
-          venueName: 'SEPTEM Paulista',
-          roomName: 'Sala Cobre',
-          address: 'Avenida Paulista, 1000 — São Paulo, SP',
-          priceCents: 3000,
-          moviePosterPath: '/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg',
-          publishedAt: new Date(),
-        },
-      })
+          status: demoSession.status,
+          startsAt: demoSession.startsAt,
+          venueName: demoSession.venueName,
+          roomName: demoSession.roomName,
+          address: demoSession.address,
+          priceCents: demoSession.priceCents,
+          ...demoSession.movie,
+          publishedAt:
+            demoSession.status === SessionStatus.PUBLISHED
+              ? publishedAt
+              : null,
+        }
 
-      await transaction.session.upsert({
-        where: { id: DEMO_TICKET_SESSION_ID },
-        create: {
-          id: DEMO_TICKET_SESSION_ID,
-          organizerId: organizer.id,
-          status: SessionStatus.PUBLISHED,
-          startsAt: secondSessionStartsAt,
-          venueName: 'SEPTEM Paulista',
-          roomName: 'Sala Marfim',
-          address: 'Avenida Paulista, 1000 — São Paulo, SP',
-          priceCents: 2600,
-          tmdbMovieId: 603,
-          movieTitle: 'Matrix',
-          movieOverview:
-            'Um programador descobre que a realidade ao seu redor esconde um sistema artificial.',
-          moviePosterPath: '/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg',
-          movieBackdropPath: '/icmmSD4vTTDKOq2vvdulafOGw93.jpg',
-          movieReleaseDate: new Date('1999-03-30T00:00:00.000Z'),
-          movieRuntimeMinutes: 136,
-          publishedAt: new Date(),
-        },
-        update: {
-          startsAt: secondSessionStartsAt,
-          venueName: 'SEPTEM Paulista',
-          roomName: 'Sala Marfim',
-          address: 'Avenida Paulista, 1000 — São Paulo, SP',
-          priceCents: 2600,
-          publishedAt: new Date(),
-        },
-      })
+        await transaction.session.upsert({
+          where: { id: demoSession.id },
+          create: { id: demoSession.id, ...sessionData },
+          update: sessionData,
+        })
 
-      await transaction.seat.createMany({
-        data: seatLayout(6, 10).map((seat) => ({
-          sessionId: DEMO_SESSION_ID,
-          ...seat,
-        })),
-        skipDuplicates: true,
-      })
-
-      await transaction.seat.createMany({
-        data: seatLayout(4, 8).map((seat) => ({
-          sessionId: DEMO_TICKET_SESSION_ID,
-          ...seat,
-        })),
-        skipDuplicates: true,
-      })
+        await transaction.seat.createMany({
+          data: seatLayout(
+            demoSession.rows,
+            demoSession.seatsPerRow,
+          ).map((seat) => ({
+            sessionId: demoSession.id,
+            ...seat,
+          })),
+          skipDuplicates: true,
+        })
+      }
 
       const demoTicketSeat = await transaction.seat.findUniqueOrThrow({
         where: {
           sessionId_label: {
-            sessionId: DEMO_TICKET_SESSION_ID,
+            sessionId: DEMO_SESSION_IDS.matrixTicket,
             label: 'A1',
           },
         },
@@ -179,9 +315,9 @@ async function seed() {
         create: {
           id: DEMO_RESERVATION_ID,
           customerId: customerTwo.id,
-          sessionId: DEMO_TICKET_SESSION_ID,
+          sessionId: DEMO_SESSION_IDS.matrixTicket,
           status: ReservationStatus.PAID,
-          expiresAt: futureDate(1),
+          expiresAt: new Date(seedNow.getTime() + 60 * 60 * 1_000),
           totalCents: 2600,
         },
         update: {
@@ -221,7 +357,7 @@ async function seed() {
         create: {
           id: DEMO_TICKET_ID,
           reservationSeatId: reservationSeat.id,
-          sessionId: DEMO_TICKET_SESSION_ID,
+          sessionId: DEMO_SESSION_IDS.matrixTicket,
           ownerId: customerTwo.id,
           status: TicketStatus.VALID,
           manualCode: generateManualCode(),
@@ -235,7 +371,7 @@ async function seed() {
     })
 
     console.log(
-      `${usersWithHashes.length} usuários, 2 sessões e 1 ingresso de demonstração preparados.`,
+      `${usersWithHashes.length} usuários, 8 sessões publicadas, 1 rascunho e 1 ingresso de demonstração preparados.`,
     )
   } finally {
     await prisma.$disconnect()

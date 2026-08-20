@@ -200,6 +200,8 @@ export function QrScanner({
   }, [active, attempt])
 
   const visibleCameraStatus = active ? cameraState.status : 'paused'
+  const announcesCameraStatus =
+    active && cameraState.status !== 'error'
 
   return (
     <section className="gate-camera" aria-labelledby="camera-heading">
@@ -208,10 +210,15 @@ export function QrScanner({
           <p className="section-kicker">Leitura por câmera</p>
           <h2 id="camera-heading">Aponte para o QR Code</h2>
         </div>
-        <span className={`camera-indicator camera-${visibleCameraStatus}`}>
+        <span
+          className={`camera-indicator camera-${visibleCameraStatus}`}
+          role={announcesCameraStatus ? 'status' : undefined}
+          aria-live={announcesCameraStatus ? 'polite' : undefined}
+          aria-atomic={announcesCameraStatus ? 'true' : undefined}
+        >
           <span aria-hidden="true">●</span>{' '}
           {visibleCameraStatus === 'scanning'
-            ? 'Lendo'
+            ? 'Câmera pronta'
             : visibleCameraStatus === 'starting'
               ? 'Abrindo câmera'
               : visibleCameraStatus === 'paused'
@@ -229,11 +236,9 @@ export function QrScanner({
         />
         <div className="camera-target" aria-hidden="true" />
         {!active ? (
-          <p className="camera-overlay" role="status">
-            {pausedMessage}
-          </p>
+          <p className="camera-overlay">{pausedMessage}</p>
         ) : cameraState.status === 'starting' ? (
-          <p className="camera-overlay" role="status">
+          <p className="camera-overlay">
             Aguardando permissão da câmera…
           </p>
         ) : null}

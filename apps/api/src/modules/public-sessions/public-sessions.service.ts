@@ -9,9 +9,12 @@ const publicSessionListSelect = {
   venueName: true,
   roomName: true,
   priceCents: true,
+  tmdbMovieId: true,
   movieTitle: true,
   moviePosterPath: true,
+  movieBackdropPath: true,
   movieReleaseDate: true,
+  movieRuntimeMinutes: true,
   _count: { select: { seats: true } },
 } satisfies Prisma.SessionSelect
 
@@ -60,9 +63,12 @@ function toPublicSessionSummary(session: PublicSessionListRecord) {
     roomName: session.roomName,
     priceCents: session.priceCents,
     movie: {
+      tmdbId: session.tmdbMovieId,
       title: session.movieTitle,
       posterPath: session.moviePosterPath,
+      backdropPath: session.movieBackdropPath,
       releaseDate: releaseDate(session.movieReleaseDate),
+      runtimeMinutes: session.movieRuntimeMinutes,
     },
     capacity: session._count.seats,
   }

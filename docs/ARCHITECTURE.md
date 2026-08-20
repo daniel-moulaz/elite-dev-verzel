@@ -49,7 +49,7 @@ A especificação OpenAPI descreve as operações reais da API e fica disponíve
 | `Ticket` | sessão, assento reservado, código manual, status, `usedAt` e GATE responsável | vínculo e código únicos; índices por sessão e status |
 | `SharedTicketLink` | ingresso, `tokenHash`, expiração/revogação | ingresso e hash únicos; token puro nunca é persistido |
 
-O snapshot do filme fica em `Session` (`tmdbId`, título, pôster, sinopse, duração e classificação disponível). Uma tabela separada não agrega valor ao MVP. Datas são armazenadas em UTC e valores monetários em centavos.
+O snapshot do filme fica em `Session` (`tmdbId`, título, pôster, backdrop, sinopse, data de lançamento e duração quando disponíveis). Uma tabela separada não agrega valor ao MVP. Datas são armazenadas em UTC e valores monetários em centavos. O resumo público expõe `tmdbId`, backdrop e duração de forma aditiva para agrupar sessões do mesmo filme e compor a Home sem consultas adicionais à API da TMDb e sem expor o token; as imagens públicas continuam vindo do CDN da própria TMDb.
 
 Estados mínimos:
 
@@ -124,6 +124,8 @@ O link é uma credencial bearer: quem o recebe pode apresentar o ingresso. A res
 Senhas usam Argon2id. O login emite JWT bearer com duração de 8 horas e segredo separado do ingresso. Um pre-handler autentica; guards verificam papel e serviços confirmam ownership na consulta ou mutação. IDs, papéis e preços recebidos do frontend nunca são aceitos como autoridade.
 
 Contas são fornecidas por seed no MVP; cadastro e recuperação de senha não são necessários.
+
+O cenário demonstrativo versionado mantém quatro contas, oito sessões publicadas de três filmes em duas datas e dois cinemas, um rascunho e um ingresso válido para a portaria. IDs fixos, `upsert` e criação de assentos com `skipDuplicates` preservam a idempotência; o seed usa somente snapshots locais e não consulta a TMDb.
 
 ## Contrato REST essencial
 

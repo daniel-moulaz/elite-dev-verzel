@@ -47,7 +47,7 @@ export function formatSessionTime(value: string): string {
 }
 
 export function movieYear(releaseDate: string | null): string {
-  return releaseDate?.slice(0, 4) || 'Ano não informado'
+  return releaseDate?.slice(0, 4) ?? ''
 }
 
 export function tmdbPosterUrl(path: string | null): string | null {

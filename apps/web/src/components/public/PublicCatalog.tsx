@@ -1,4 +1,11 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from 'react'
 import {
   ApiError,
   getPublicSessions,
@@ -11,6 +18,7 @@ import {
   formatSessionDay,
   formatSessionTime,
   movieYear,
+  tmdbBackdropUrl,
   tmdbPosterUrl,
 } from '../organizer/formatters'
 
@@ -34,6 +42,7 @@ interface MovieProgram {
   key: string
   movie: PublicSessionSummary['movie']
   firstSession: PublicSessionSummary
+  sessions: PublicSessionSummary[]
   venues: VenueProgram[]
   minimumPriceCents: number
   hasDifferentPrices: boolean
@@ -50,6 +59,83 @@ const dayFormatter = new Intl.DateTimeFormat('pt-BR', {
 const monthFormatter = new Intl.DateTimeFormat('pt-BR', {
   month: 'short',
 })
+
+const catalogContextKey = 'septem-catalog-context'
+
+interface CatalogContext {
+  query: string
+  dateKey: string
+  venueName: string
+  featuredMovieId: number | null
+}
+
+function readCatalogContext(): CatalogContext {
+  const emptyContext: CatalogContext = {
+    query: '',
+    dateKey: '',
+    venueName: '',
+    featuredMovieId: null,
+  }
+
+  let storedContext = emptyContext
+
+  try {
+    const storedValue = sessionStorage.getItem(catalogContextKey)
+
+    if (storedValue) {
+      const parsed = JSON.parse(storedValue) as Partial<CatalogContext>
+
+      storedContext = {
+        query: typeof parsed.query === 'string' ? parsed.query : '',
+        dateKey: typeof parsed.dateKey === 'string' ? parsed.dateKey : '',
+        venueName:
+          typeof parsed.venueName === 'string' ? parsed.venueName : '',
+        featuredMovieId:
+          typeof parsed.featuredMovieId === 'number' &&
+          Number.isSafeInteger(parsed.featuredMovieId) &&
+          parsed.featuredMovieId > 0
+            ? parsed.featuredMovieId
+            : null,
+      }
+    }
+  } catch {
+    storedContext = emptyContext
+  }
+
+  const params = new URLSearchParams(window.location.search)
+  const movieParam = Number(params.get('movie'))
+
+  return {
+    query: params.has('q')
+      ? (params.get('q') ?? '').trim().slice(0, 120)
+      : storedContext.query,
+    dateKey: params.has('date')
+      ? (params.get('date') ?? '')
+      : storedContext.dateKey,
+    venueName: params.has('cinema')
+      ? (params.get('cinema') ?? '').trim().slice(0, 120)
+      : storedContext.venueName,
+    featuredMovieId:
+      params.has('movie') && Number.isSafeInteger(movieParam) && movieParam > 0
+        ? movieParam
+        : storedContext.featuredMovieId,
+  }
+}
+
+function readUrlCatalogContext(): CatalogContext {
+  const params = new URLSearchParams(window.location.search)
+  const movieParam = Number(params.get('movie'))
+
+  return {
+    query: (params.get('q') ?? '').trim().slice(0, 120),
+    dateKey: params.get('date') ?? '',
+    venueName: (params.get('cinema') ?? '').trim().slice(0, 120),
+    featuredMovieId:
+      params.has('movie') && Number.isSafeInteger(movieParam) && movieParam > 0
+        ? movieParam
+        : null,
+  }
+}
 
 function localDateKey(value: string | Date): string {
   const date = typeof value === 'string' ? new Date(value) : value
@@ -76,7 +162,7 @@ function dateOptions(sessions: PublicSessionSummary[]): SessionDateOption[] {
 }
 
 function movieGroupKey(session: PublicSessionSummary): string {
-  return [session.movie.title, session.movie.releaseDate ?? ''].join('\u0000')
+  return String(session.movie.tmdbId)
 }
 
 function groupSessionsByMovie(
@@ -131,6 +217,7 @@ function groupSessionsByMovie(
       movie: group.movie,
       // Cada grupo nasce com a sessão que o criou.
       firstSession: group.sessions[0]!,
+      sessions: group.sessions,
       venues: Array.from(venueGroups.values()),
       minimumPriceCents: Math.min(...prices),
       hasDifferentPrices: prices.size > 1,
@@ -141,10 +228,15 @@ function groupSessionsByMovie(
 function dateTabLabels(startsAt: string) {
   const date = new Date(startsAt)
   const isToday = localDateKey(date) === localDateKey(new Date())
+  const tomorrow = new Date()
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const isTomorrow = localDateKey(date) === localDateKey(tomorrow)
 
   return {
     weekday: isToday
       ? 'Hoje'
+      : isTomorrow
+        ? 'Amanhã'
       : weekdayFormatter.format(date).replace('.', ''),
     day: dayFormatter.format(date),
     month: monthFormatter.format(date).replace('.', ''),
@@ -152,9 +244,17 @@ function dateTabLabels(startsAt: string) {
 }
 
 export function PublicCatalog({ onOpenSession }: PublicCatalogProps) {
-  const [queryInput, setQueryInput] = useState('')
-  const [activeQuery, setActiveQuery] = useState('')
-  const [selectedDateKey, setSelectedDateKey] = useState('')
+  const [initialContext] = useState(readCatalogContext)
+  const restoredFeaturedMovieId = useRef(initialContext.featuredMovieId)
+  const railRef = useRef<HTMLDivElement>(null)
+  const [queryInput, setQueryInput] = useState(initialContext.query)
+  const [activeQuery, setActiveQuery] = useState(initialContext.query)
+  const [selectedDateKey, setSelectedDateKey] = useState(
+    initialContext.dateKey,
+  )
+  const [selectedVenueName, setSelectedVenueName] = useState(
+    initialContext.venueName,
+  )
   const [sessions, setSessions] = useState<PublicSessionSummary[]>([])
   const [catalogSessions, setCatalogSessions] = useState<
     PublicSessionSummary[]
@@ -164,50 +264,117 @@ export function PublicCatalog({ onOpenSession }: PublicCatalogProps) {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>(
     'loading',
   )
+  const [catalogStatus, setCatalogStatus] = useState<
+    'loading' | 'ready' | 'error'
+  >('loading')
   const [errorMessage, setErrorMessage] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
+  const [catalogReloadKey, setCatalogReloadKey] = useState(0)
+  const [railOverflow, setRailOverflow] = useState({
+    previous: false,
+    next: false,
+  })
+  const activeQueryRef = useRef(activeQuery)
+
+  useEffect(() => {
+    activeQueryRef.current = activeQuery
+  }, [activeQuery])
 
   useEffect(() => {
     const controller = new AbortController()
 
-    getPublicSessions(activeQuery, controller.signal)
+    getPublicSessions('', controller.signal)
       .then((result) => {
         const sortedSessions = [...result].sort(
           (first, second) =>
             new Date(first.startsAt).getTime() -
             new Date(second.startsAt).getTime(),
         )
-        setSessions(sortedSessions)
-
-        if (!activeQuery) {
-          setCatalogSessions(sortedSessions)
-          setFeaturedSession((current) => {
-            if (!current) {
-              return sortedSessions[0] ?? null
-            }
-
-            return (
-              sortedSessions.find(
+        setCatalogSessions(sortedSessions)
+        setCatalogStatus('ready')
+        setFeaturedSession((current) => {
+          const restoredSession = restoredFeaturedMovieId.current
+            ? sortedSessions.find(
                 (session) =>
-                  movieGroupKey(session) === movieGroupKey(current),
-              ) ??
-              sortedSessions[0] ??
-              null
-            )
-          })
-        }
+                  session.movie.tmdbId === restoredFeaturedMovieId.current,
+              )
+            : null
 
-        setStatus('ready')
+          const nextSession =
+            restoredSession ??
+            (current
+              ? sortedSessions.find(
+                  (session) =>
+                    movieGroupKey(session) === movieGroupKey(current),
+                )
+              : null) ??
+            sortedSessions[0] ??
+            null
+
+          restoredFeaturedMovieId.current = nextSession?.movie.tmdbId ?? null
+          return nextSession
+        })
+
+        if (!activeQueryRef.current) {
+          setSessions(sortedSessions)
+          setStatus('ready')
+        }
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) {
           return
         }
 
+        setCatalogStatus('error')
+        if (!activeQueryRef.current) {
+          setErrorMessage(
+            error instanceof ApiError
+              ? error.message
+              : 'Não foi possível carregar a programação.',
+          )
+          setStatus('error')
+        }
+      })
+
+    return () => controller.abort()
+  }, [catalogReloadKey])
+
+  useEffect(() => {
+    if (!activeQuery) {
+      return
+    }
+
+    const controller = new AbortController()
+
+    getPublicSessions(activeQuery, controller.signal)
+      .then((result) => {
+        if (
+          controller.signal.aborted ||
+          activeQueryRef.current !== activeQuery
+        ) {
+          return
+        }
+
+        const sortedSessions = [...result].sort(
+          (first, second) =>
+            new Date(first.startsAt).getTime() -
+            new Date(second.startsAt).getTime(),
+        )
+        setSessions(sortedSessions)
+        setStatus('ready')
+      })
+      .catch((error: unknown) => {
+        if (
+          controller.signal.aborted ||
+          activeQueryRef.current !== activeQuery
+        ) {
+          return
+        }
+
         setErrorMessage(
           error instanceof ApiError
             ? error.message
-            : 'Não foi possível carregar a programação.',
+            : 'Não foi possível concluir a busca.',
         )
         setStatus('error')
       })
@@ -215,72 +382,353 @@ export function PublicCatalog({ onOpenSession }: PublicCatalogProps) {
     return () => controller.abort()
   }, [activeQuery, reloadKey])
 
+  useEffect(() => {
+    function handlePopState() {
+      const nextContext = readUrlCatalogContext()
+
+      restoredFeaturedMovieId.current = nextContext.featuredMovieId
+      setQueryInput(nextContext.query)
+      setSelectedDateKey(nextContext.dateKey)
+      setSelectedVenueName(nextContext.venueName)
+      setErrorMessage('')
+
+      if (nextContext.query !== activeQuery) {
+        if (nextContext.query) {
+          setStatus('loading')
+        } else if (catalogSessions.length > 0) {
+          setSessions(catalogSessions)
+          setStatus('ready')
+        } else {
+          setStatus('loading')
+          if (catalogStatus !== 'loading') {
+            setCatalogStatus('loading')
+            setCatalogReloadKey((value) => value + 1)
+          }
+        }
+        activeQueryRef.current = nextContext.query
+        setActiveQuery(nextContext.query)
+      }
+
+      setFeaturedSession(
+        catalogSessions.find(
+          (session) =>
+            session.movie.tmdbId === nextContext.featuredMovieId,
+        ) ?? catalogSessions[0] ?? null,
+      )
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [activeQuery, catalogSessions, catalogStatus])
+
+  useEffect(() => {
+    const nextContext = {
+      query: activeQuery,
+      dateKey: selectedDateKey,
+      venueName: selectedVenueName,
+      featuredMovieId:
+        featuredSession?.movie.tmdbId ?? restoredFeaturedMovieId.current,
+    } satisfies CatalogContext
+
+    try {
+      sessionStorage.setItem(
+        catalogContextKey,
+        JSON.stringify(nextContext),
+      )
+    } catch {
+      // A navegação continua funcional quando o navegador bloqueia storage.
+    }
+
+    const url = new URL(window.location.href)
+    const urlValues = {
+      q: nextContext.query,
+      date: nextContext.dateKey,
+      cinema: nextContext.venueName,
+      movie: nextContext.featuredMovieId?.toString() ?? '',
+    }
+
+    for (const [name, value] of Object.entries(urlValues)) {
+      if (value) {
+        url.searchParams.set(name, value)
+      } else {
+        url.searchParams.delete(name)
+      }
+    }
+
+    const nextRelativeUrl = `${url.pathname}${url.search}${url.hash}`
+    const currentRelativeUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`
+
+    if (nextRelativeUrl !== currentRelativeUrl) {
+      window.history.replaceState(window.history.state, '', nextRelativeUrl)
+    }
+  }, [activeQuery, featuredSession, selectedDateKey, selectedVenueName])
+
+  const updateRailOverflow = useCallback(() => {
+    const rail = railRef.current
+
+    if (!rail) {
+      return
+    }
+
+    const edgeTolerance = 2
+    const nextOverflow = {
+      previous: rail.scrollLeft > edgeTolerance,
+      next:
+        rail.scrollLeft + rail.clientWidth <
+        rail.scrollWidth - edgeTolerance,
+    }
+
+    setRailOverflow((current) =>
+      current.previous === nextOverflow.previous &&
+      current.next === nextOverflow.next
+        ? current
+        : nextOverflow,
+    )
+  }, [])
+
+  useEffect(() => {
+    const rail = railRef.current
+
+    if (!rail) {
+      return
+    }
+
+    updateRailOverflow()
+    const resizeObserver = new ResizeObserver(updateRailOverflow)
+    resizeObserver.observe(rail)
+    rail.addEventListener('scroll', updateRailOverflow, { passive: true })
+
+    return () => {
+      resizeObserver.disconnect()
+      rail.removeEventListener('scroll', updateRailOverflow)
+    }
+  }, [catalogSessions, updateRailOverflow])
+
   function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const nextQuery = queryInput.trim()
-    setStatus('loading')
     setErrorMessage('')
     setSelectedDateKey('')
 
+    if (!nextQuery) {
+      if (activeQuery) {
+        activeQueryRef.current = ''
+        setActiveQuery('')
+      }
+
+      if (catalogSessions.length > 0) {
+        setSessions(catalogSessions)
+        setStatus('ready')
+      } else {
+        setStatus('loading')
+        if (catalogStatus !== 'loading') {
+          setCatalogStatus('loading')
+          setCatalogReloadKey((value) => value + 1)
+        }
+      }
+      return
+    }
+
+    setStatus('loading')
     if (nextQuery === activeQuery) {
       setReloadKey((value) => value + 1)
     } else {
+      activeQueryRef.current = nextQuery
       setActiveQuery(nextQuery)
     }
   }
 
   function clearSearch() {
     setQueryInput('')
-    setStatus('loading')
     setErrorMessage('')
     setSelectedDateKey('')
 
     if (activeQuery) {
+      activeQueryRef.current = ''
       setActiveQuery('')
-    } else {
-      setReloadKey((value) => value + 1)
     }
+
+    if (catalogSessions.length > 0) {
+      setSessions(catalogSessions)
+      setStatus('ready')
+    } else {
+      setStatus('loading')
+      if (catalogStatus !== 'loading') {
+        setCatalogStatus('loading')
+        setCatalogReloadKey((value) => value + 1)
+      }
+    }
+  }
+
+  function clearFilters() {
+    setQueryInput('')
+    setSelectedDateKey('')
+    setSelectedVenueName('')
+    setErrorMessage('')
+
+    if (activeQuery) {
+      activeQueryRef.current = ''
+      setActiveQuery('')
+    }
+
+    if (catalogSessions.length > 0) {
+      setSessions(catalogSessions)
+      setStatus('ready')
+    } else {
+      setStatus('loading')
+      if (catalogStatus !== 'loading') {
+        setCatalogStatus('loading')
+        setCatalogReloadKey((value) => value + 1)
+      }
+    }
+  }
+
+  function moveRail(direction: -1 | 1) {
+    const rail = railRef.current
+
+    if (!rail) {
+      return
+    }
+
+    rail.scrollBy({
+      left: direction * rail.clientWidth * 0.72,
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? 'auto'
+        : 'smooth',
+    })
   }
 
   function retry() {
     setStatus('loading')
     setErrorMessage('')
-    setReloadKey((value) => value + 1)
+    if (catalogSessions.length === 0) {
+      setCatalogStatus('loading')
+      setCatalogReloadKey((value) => value + 1)
+    }
+    if (activeQuery) {
+      setReloadKey((value) => value + 1)
+    }
   }
 
-  const availableDates = dateOptions(sessions)
-  const effectiveDateKey = availableDates.some(
+  const venueNames = Array.from(
+    new Set(sessions.map((session) => session.venueName)),
+  ).sort((first, second) => first.localeCompare(second, 'pt-BR'))
+  const hasValidSelectedVenue =
+    !selectedVenueName || venueNames.includes(selectedVenueName)
+  const effectiveVenueName = hasValidSelectedVenue
+    ? selectedVenueName
+    : ''
+  const venueSessions = effectiveVenueName
+    ? sessions.filter((session) => session.venueName === effectiveVenueName)
+    : sessions
+  const availableDates = dateOptions(venueSessions)
+  const hasValidSelectedDate = availableDates.some(
     (option) => option.key === selectedDateKey,
   )
+  const effectiveDateKey = hasValidSelectedDate
     ? selectedDateKey
     : (availableDates[0]?.key ?? '')
   const selectedDate = availableDates.find(
     (option) => option.key === effectiveDateKey,
   )
-  const selectedSessions = sessions.filter(
+  const selectedSessions = venueSessions.filter(
     (session) => localDateKey(session.startsAt) === effectiveDateKey,
   )
   const moviePrograms = groupSessionsByMovie(selectedSessions)
   const catalogMovies = groupSessionsByMovie(catalogSessions)
+  const featuredProgram = featuredSession
+    ? catalogMovies.find(
+        (program) => program.movie.tmdbId === featuredSession.movie.tmdbId,
+      )
+    : undefined
+  const featuredShowtimes = featuredProgram
+    ? featuredProgram.sessions.filter(
+        (session) =>
+          session.venueName === featuredProgram.firstSession.venueName &&
+          session.roomName === featuredProgram.firstSession.roomName &&
+          localDateKey(session.startsAt) ===
+            localDateKey(featuredProgram.firstSession.startsAt),
+      )
+    : []
+  const stageShowtimes =
+    featuredShowtimes.length > 0
+      ? featuredShowtimes
+      : featuredSession
+        ? [featuredSession]
+        : []
+  const stageMinimumPriceCents =
+    stageShowtimes.length > 0
+      ? Math.min(...stageShowtimes.map((session) => session.priceCents))
+      : null
+  const stageHasDifferentPrices =
+    new Set(stageShowtimes.map((session) => session.priceCents)).size > 1
   const featuredPosterUrl = featuredSession
     ? tmdbPosterUrl(featuredSession.movie.posterPath)
+    : null
+  const featuredBackdropUrl = featuredSession
+    ? tmdbBackdropUrl(featuredSession.movie.backdropPath)
     : null
   const featuredMovieKey = featuredSession
     ? movieGroupKey(featuredSession)
     : null
-  const venueNames = Array.from(
-    new Set(sessions.map((session) => session.venueName)),
+  const activeMovieIndex = catalogMovies.findIndex(
+    (program) => program.key === featuredMovieKey,
   )
   const programmingContext =
-    venueNames.length === 1
+    effectiveVenueName ||
+    (venueNames.length === 1
       ? venueNames[0]
-      : `${venueNames.length} cinemas na programação`
+      : `${venueNames.length} cinemas na programação`)
+  const hasActiveFilters = Boolean(
+    activeQuery ||
+      effectiveVenueName ||
+      (selectedDateKey && selectedDateKey === effectiveDateKey),
+  )
+
+  function activateMovie(
+    program: MovieProgram,
+    railItem?: HTMLButtonElement,
+  ) {
+    restoredFeaturedMovieId.current = program.movie.tmdbId
+    setFeaturedSession(program.firstSession)
+    railItem?.scrollIntoView({
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? 'auto'
+        : 'smooth',
+      block: 'nearest',
+      inline: 'center',
+    })
+  }
+
+  function handleRailKeyDown(
+    event: KeyboardEvent<HTMLButtonElement>,
+    movieIndex: number,
+  ) {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+      return
+    }
+
+    const nextIndex =
+      event.key === 'ArrowLeft' ? movieIndex - 1 : movieIndex + 1
+    const nextProgram = catalogMovies[nextIndex]
+    const nextItem = railRef.current?.querySelectorAll<HTMLButtonElement>(
+      '.poster-rail-item',
+    )[nextIndex]
+
+    if (!nextProgram || !nextItem) {
+      return
+    }
+
+    event.preventDefault()
+    activateMovie(nextProgram, nextItem)
+    nextItem.focus()
+  }
 
   return (
     <div className="public-content catalog-page">
       <h1 className="visually-hidden">Programação SEPTEM Cinemas</h1>
 
-      {status === 'loading' && !featuredSession ? (
+      {catalogStatus === 'loading' && !featuredSession ? (
         <section
           className="cinematic-stage cinematic-stage-loading"
           aria-busy="true"
@@ -302,10 +750,13 @@ export function PublicCatalog({ onOpenSession }: PublicCatalogProps) {
           aria-labelledby="featured-movie-title"
         >
           <div
+            key={featuredSession.movie.tmdbId}
             className="stage-atmosphere"
             style={
-              featuredPosterUrl
-                ? { backgroundImage: `url("${featuredPosterUrl}")` }
+              featuredBackdropUrl || featuredPosterUrl
+                ? {
+                    backgroundImage: `url("${featuredBackdropUrl ?? featuredPosterUrl}")`,
+                  }
                 : undefined
             }
             aria-hidden="true"
@@ -316,6 +767,7 @@ export function PublicCatalog({ onOpenSession }: PublicCatalogProps) {
               src={featuredPosterUrl}
               title={featuredSession.movie.title}
               loading="eager"
+              variant="hero"
             />
             <div className="stage-copy">
               <p className="stage-kicker">Agora na SEPTEM</p>
@@ -324,37 +776,50 @@ export function PublicCatalog({ onOpenSession }: PublicCatalogProps) {
                 {featuredSession.movie.releaseDate ? (
                   <span>{movieYear(featuredSession.movie.releaseDate)}</span>
                 ) : null}
-                <span>Ingresso {formatPrice(featuredSession.priceCents)}</span>
+                {featuredSession.movie.runtimeMinutes ? (
+                  <span>{featuredSession.movie.runtimeMinutes} min</span>
+                ) : null}
+                {stageMinimumPriceCents !== null ? (
+                  <span>
+                    {stageHasDifferentPrices ? 'A partir de ' : 'Ingresso '}
+                    {formatPrice(stageMinimumPriceCents)}
+                  </span>
+                ) : null}
               </p>
               <p className="stage-location">
                 <strong>{featuredSession.venueName}</strong>
                 <span>{featuredSession.roomName}</span>
               </p>
-              <div className="stage-next-session">
-                <div>
-                  <span>Próxima sessão</span>
+              <div className="stage-next-session stage-showtimes">
+                <div className="stage-showtimes-heading">
+                  <span>Próximas sessões</span>
                   <small>
                     {formatCompactSessionDay(featuredSession.startsAt)}
                   </small>
                 </div>
-                <button
-                  type="button"
-                  className="stage-showtime-button"
-                  onClick={() => onOpenSession(featuredSession.id)}
-                  aria-label={`Escolher lugares para ${featuredSession.movie.title}, em ${formatSessionDay(featuredSession.startsAt)}, às ${formatSessionTime(featuredSession.startsAt)}, ${featuredSession.venueName}, ${featuredSession.roomName}`}
-                >
-                  <time dateTime={featuredSession.startsAt}>
-                    {formatSessionTime(featuredSession.startsAt)}
-                  </time>
-                  <span>Escolher lugares</span>
-                </button>
+                <div className="stage-showtime-list">
+                  {stageShowtimes.map((session) => (
+                    <button
+                      type="button"
+                      className="stage-showtime-button"
+                      key={session.id}
+                      onClick={() => onOpenSession(session.id)}
+                      aria-label={`Escolher lugares para ${session.movie.title}, em ${formatSessionDay(session.startsAt)}, às ${formatSessionTime(session.startsAt)}, ${session.venueName}, ${session.roomName}, ${formatPrice(session.priceCents)}`}
+                    >
+                      <time dateTime={session.startsAt}>
+                        {formatSessionTime(session.startsAt)}
+                      </time>
+                      <span>{formatPrice(session.priceCents)} · escolher lugares</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
         </section>
       ) : null}
 
-      {status === 'loading' && catalogMovies.length === 0 ? (
+      {catalogStatus === 'loading' && catalogMovies.length === 0 ? (
         <section className="poster-rail-section poster-rail-loading">
           <div className="poster-rail-heading">
             <p>SEPTEM Cinemas</p>
@@ -369,26 +834,75 @@ export function PublicCatalog({ onOpenSession }: PublicCatalogProps) {
       {catalogMovies.length > 0 ? (
         <section className="poster-rail-section" aria-labelledby="poster-rail-title">
           <header className="poster-rail-heading">
-            <p>SEPTEM Cinemas</p>
-            <h2 id="poster-rail-title">Em cartaz</h2>
+            <div>
+              <p>SEPTEM Cinemas</p>
+              <h2 id="poster-rail-title">Em cartaz</h2>
+            </div>
+            {railOverflow.previous || railOverflow.next ? (
+              <div className="poster-rail-controls" aria-label="Navegar pelos filmes">
+                <button
+                  type="button"
+                  onClick={() => moveRail(-1)}
+                  disabled={!railOverflow.previous}
+                  aria-label="Filmes anteriores"
+                >
+                  <span aria-hidden="true">←</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => moveRail(1)}
+                  disabled={!railOverflow.next}
+                  aria-label="Próximos filmes"
+                >
+                  <span aria-hidden="true">→</span>
+                </button>
+              </div>
+            ) : null}
           </header>
           <p className="visually-hidden" role="status" aria-live="polite">
             {featuredSession
               ? `Filme em destaque: ${featuredSession.movie.title}`
               : ''}
           </p>
-          <div className="poster-rail" aria-label="Filmes em cartaz">
-            {catalogMovies.map((program) => {
+          <div
+            ref={railRef}
+            className={`poster-rail ${
+              !railOverflow.previous && !railOverflow.next
+                ? 'is-contained'
+                : ''
+            }`.trim()}
+            aria-label="Filmes em cartaz"
+          >
+            {catalogMovies.map((program, movieIndex) => {
               const isActive = program.key === featuredMovieKey
+              const distanceFromActive =
+                activeMovieIndex === -1 ? 0 : movieIndex - activeMovieIndex
+              const positionClass = isActive
+                ? 'is-active'
+                : Math.abs(distanceFromActive) === 1
+                  ? 'is-adjacent'
+                  : 'is-distant'
+              const sideClass =
+                distanceFromActive < 0
+                  ? 'is-before'
+                  : distanceFromActive > 0
+                    ? 'is-after'
+                    : ''
               const posterUrl = tmdbPosterUrl(program.movie.posterPath)
 
               return (
                 <button
                   type="button"
-                  className={`poster-rail-item ${isActive ? 'is-active' : ''}`.trim()}
+                  className={`poster-rail-item ${positionClass} ${sideClass}`.trim()}
                   key={program.key}
                   aria-pressed={isActive}
-                  onClick={() => setFeaturedSession(program.firstSession)}
+                  data-distance={distanceFromActive}
+                  onKeyDown={(event) =>
+                    handleRailKeyDown(event, movieIndex)
+                  }
+                  onClick={(event) => {
+                    activateMovie(program, event.currentTarget)
+                  }}
                 >
                   <span className="poster-rail-frame">
                     <PosterImage
@@ -450,14 +964,46 @@ export function PublicCatalog({ onOpenSession }: PublicCatalogProps) {
             </form>
           </header>
 
-          {activeQuery && status !== 'loading' ? (
+          {activeQuery && status === 'ready' ? (
             <div className="search-context">
               <p>
-                Resultado para <strong>“{activeQuery}”</strong>
+                {sessions.length}{' '}
+                {sessions.length === 1 ? 'sessão encontrada' : 'sessões encontradas'}
+                {' '}para <strong>“{activeQuery}”</strong>
               </p>
               <button type="button" className="text-button" onClick={clearSearch}>
                 Limpar busca
               </button>
+            </div>
+          ) : null}
+
+          {status === 'ready' && sessions.length > 0 ? (
+            <div className="catalog-filters" aria-label="Filtros da programação">
+              <label htmlFor="venue-filter">Cinema</label>
+              <select
+                id="venue-filter"
+                value={effectiveVenueName}
+                onChange={(event) => {
+                  setSelectedVenueName(event.target.value)
+                  setSelectedDateKey('')
+                }}
+              >
+                <option value="">Todos os cinemas</option>
+                {venueNames.map((venueName) => (
+                  <option key={venueName} value={venueName}>
+                    {venueName}
+                  </option>
+                ))}
+              </select>
+              {hasActiveFilters ? (
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={clearFilters}
+                >
+                  Limpar filtros
+                </button>
+              ) : null}
             </div>
           ) : null}
 
@@ -506,7 +1052,7 @@ export function PublicCatalog({ onOpenSession }: PublicCatalogProps) {
               <span className="state-symbol" aria-hidden="true">○</span>
               <h3>
                 {activeQuery
-                  ? 'Nenhuma sessão corresponde à busca.'
+                  ? `Nenhum resultado para “${activeQuery}”.`
                   : 'Ainda não há sessões publicadas.'}
               </h3>
               <p>
@@ -515,7 +1061,7 @@ export function PublicCatalog({ onOpenSession }: PublicCatalogProps) {
                   : 'Volte em breve para conferir a próxima programação.'}
               </p>
               {activeQuery ? (
-                <button type="button" onClick={clearSearch}>Ver toda a programação</button>
+                <button type="button" onClick={clearFilters}>Ver toda a programação</button>
               ) : null}
             </div>
           ) : null}

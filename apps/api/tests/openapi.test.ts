@@ -369,6 +369,41 @@ describe('OpenAPI documentation', () => {
     const response = await app.inject({ method: 'GET', url: '/docs/json' })
     const document = asObject(response.json(), 'document')
 
+    const listSessions = getOperation(document, '/sessions', 'get')
+    const listSessionsResponse = resolveLocalReference(
+      document,
+      getResponseSchema(listSessions, '200'),
+    )
+    const sessionsProperty = findPropertySchema(
+      document,
+      listSessionsResponse,
+      'sessions',
+    )
+
+    if (!sessionsProperty) {
+      throw new Error('Resposta pública sem a lista de sessões documentada.')
+    }
+
+    const sessionItem = resolveLocalReference(
+      document,
+      sessionsProperty.items,
+    )
+    const movieProperty = findPropertySchema(document, sessionItem, 'movie')
+
+    if (!movieProperty) {
+      throw new Error('Resumo público sem snapshot de filme documentado.')
+    }
+
+    expect(findPropertySchema(document, movieProperty, 'tmdbId')).toMatchObject(
+      { type: 'integer', minimum: 1 },
+    )
+    expect(
+      findPropertySchema(document, movieProperty, 'backdropPath'),
+    ).toMatchObject({ type: 'string', nullable: true })
+    expect(
+      findPropertySchema(document, movieProperty, 'runtimeMinutes'),
+    ).toMatchObject({ type: 'integer', minimum: 1, nullable: true })
+
     const consumeTicket = getOperation(
       document,
       '/gate/tickets/consume',

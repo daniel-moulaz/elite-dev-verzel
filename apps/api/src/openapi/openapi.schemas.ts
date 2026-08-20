@@ -307,11 +307,25 @@ const schemaDefinitions = {
       movie: {
         type: 'object',
         additionalProperties: false,
-        required: ['title', 'posterPath', 'releaseDate'],
+        required: [
+          'tmdbId',
+          'title',
+          'posterPath',
+          'backdropPath',
+          'releaseDate',
+          'runtimeMinutes',
+        ],
         properties: {
+          tmdbId: { type: 'integer', minimum: 1 },
           title: { type: 'string' },
           posterPath: nullableTextSchema,
+          backdropPath: nullableTextSchema,
           releaseDate: nullableDateSchema,
+          runtimeMinutes: {
+            type: 'integer',
+            minimum: 1,
+            nullable: true,
+          },
         },
       },
       capacity: { type: 'integer', minimum: 0 },

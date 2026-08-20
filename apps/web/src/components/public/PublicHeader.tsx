@@ -1,3 +1,4 @@
+import type { MouseEvent } from 'react'
 import type { AuthenticatedUser } from '../../api'
 import { BrandLockup } from '../common/BrandLockup'
 
@@ -9,6 +10,24 @@ interface PublicHeaderProps {
   onTickets: () => void
   publicOnly?: boolean
   activeItem?: 'programming' | 'tickets'
+}
+
+function followInternalLink(
+  event: MouseEvent<HTMLAnchorElement>,
+  navigate: () => void,
+) {
+  if (
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey
+  ) {
+    return
+  }
+
+  event.preventDefault()
+  navigate()
 }
 
 export function PublicHeader({
@@ -23,33 +42,33 @@ export function PublicHeader({
   return (
     <header className="topbar public-topbar">
       <div className="header-primary">
-        <button
-          type="button"
+        <a
+          href="/"
           className="brand-button"
-          onClick={onHome}
+          onClick={(event) => followInternalLink(event, onHome)}
           aria-label="SEPTEM Cinemas — ir para a programação"
         >
           <BrandLockup />
-        </button>
+        </a>
 
         <nav className="main-navigation" aria-label="Navegação principal">
-          <button
-            type="button"
+          <a
+            href="/"
             className={`nav-link ${activeItem === 'programming' ? 'is-active' : ''}`.trim()}
             aria-current={activeItem === 'programming' ? 'page' : undefined}
-            onClick={onHome}
+            onClick={(event) => followInternalLink(event, onHome)}
           >
             Programação
-          </button>
+          </a>
           {!publicOnly && user?.role === 'CUSTOMER' ? (
-            <button
-              type="button"
+            <a
+              href="/me/tickets"
               className={`nav-link ${activeItem === 'tickets' ? 'is-active' : ''}`.trim()}
               aria-current={activeItem === 'tickets' ? 'page' : undefined}
-              onClick={onTickets}
+              onClick={(event) => followInternalLink(event, onTickets)}
             >
               Meus ingressos
-            </button>
+            </a>
           ) : null}
         </nav>
       </div>
@@ -64,9 +83,13 @@ export function PublicHeader({
               </button>
             </>
           ) : (
-            <button type="button" className="secondary-button" onClick={onLogin}>
+            <a
+              href="/login"
+              className="secondary-button link-button"
+              onClick={(event) => followInternalLink(event, onLogin)}
+            >
               Entrar
-            </button>
+            </a>
           )}
         </div>
       )}

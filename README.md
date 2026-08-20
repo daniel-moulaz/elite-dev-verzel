@@ -60,7 +60,7 @@ O seed é idempotente e prepara estas contas:
 | Cliente | `customer2@demo.local` | `Demo@123` |
 | Portaria | `gate@demo.local` | `Demo@123` |
 
-As senhas são persistidas somente como hashes Argon2id. O seed também cria duas sessões futuras: uma livre para testar reservas e pagamentos, e outra com um ingresso `VALID` para `customer2@demo.local`. Os snapshots são locais e o seed não chama a TMDb. Para testar a API no PowerShell:
+As senhas são persistidas somente como hashes Argon2id. O seed também cria oito sessões publicadas de três filmes em duas datas, um rascunho e um ingresso `VALID` para `customer2@demo.local`. Os snapshots são locais e o seed não chama a TMDb. Para testar a API no PowerShell:
 
 ```powershell
 $body = @{ email = "organizer@demo.local"; password = "Demo@123" } | ConvertTo-Json
@@ -91,8 +91,8 @@ O seed prepara um ingresso `VALID` de **Matrix**, assento A1, para `customer2@de
 Roteiro dos resultados:
 
 - selecione **Interestelar** e apresente o ingresso de Matrix: `WRONG_EVENT`; o ingresso não é alterado;
-- troque para **Matrix** e apresente o mesmo ingresso: `VALID`; o backend o move para `USED` com horário do PostgreSQL e o GATE autenticado;
-- apresente novamente em Matrix: `ALREADY_USED`;
+- troque para **Matrix**, às **15:30**, na **SEPTEM Paulista — Sala Marfim**, e apresente o mesmo ingresso: `VALID`; o backend o move para `USED` com horário do PostgreSQL e o GATE autenticado;
+- apresente novamente nessa mesma sessão de Matrix: `ALREADY_USED`;
 - digite uma credencial deliberadamente malformada, como `INVALIDO`: `INVALID`, sem revelar detalhes criptográficos.
 
 A câmera usa `getUserMedia`: em produção ela requer HTTPS e permissão do navegador; `localhost` é aceito como contexto seguro para desenvolvimento. Um celular acessando `http://<IP-da-rede>` normalmente não receberá acesso à câmera, então use o deploy HTTPS para o teste físico. Permissão negada, câmera ausente ou ocupada não bloqueiam a alternativa manual.
