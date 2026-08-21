@@ -82,7 +82,7 @@ export const apiDocumentation = {
         400: errorResponse('E-mail ou senha em formato inválido.'),
         401: errorResponse('Credenciais inválidas.'),
         429: errorResponse(
-          'Tentativas de login demais para esta conta e origem. O cabeçalho Retry-After informa quantos segundos faltam.',
+          'Tentativas de login malsucedidas demais a partir desta origem. O limite considera apenas a origem da requisição, nunca a conta, para que ninguém possa bloquear o login de outro usuário. O cabeçalho Retry-After informa quantos segundos faltam.',
         ),
       },
     }),
