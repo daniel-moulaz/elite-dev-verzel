@@ -809,7 +809,13 @@ export function PublicCatalog({ onOpenSession }: PublicCatalogProps) {
                       <time dateTime={session.startsAt}>
                         {formatSessionTime(session.startsAt)}
                       </time>
-                      <span>{formatPrice(session.priceCents)} · escolher lugares</span>
+                      <span>
+                        {formatPrice(session.priceCents)}
+                        <span className="stage-showtime-cta">
+                          {' '}
+                          · escolher lugares
+                        </span>
+                      </span>
                     </button>
                   ))}
                 </div>

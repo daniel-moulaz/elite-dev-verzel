@@ -1027,9 +1027,10 @@ export function SessionEditor({
 
             <fieldset className="layout-fieldset">
               <legend>Layout da sala</legend>
-              <p>
-                Os lugares serão gerados de A1 em diante. O layout poderá ser
-                alterado somente enquanto a sessão for rascunho.
+              <p id="layout-hint">
+                {isLayoutLocked
+                  ? 'Os lugares desta sessão já foram reservados alguma vez. O mapa não pode ser reconstruído sem apagar esse histórico; os demais campos continuam editáveis.'
+                  : 'Os lugares serão gerados de A1 em diante. O layout pode ser alterado enquanto nenhum lugar tiver sido reservado.'}
               </p>
               <div className="layout-configurator">
                 <div className="layout-fields">
@@ -1047,7 +1048,9 @@ export function SessionEditor({
                       }
                       aria-invalid={Boolean(fieldErrors.rows)}
                       aria-describedby={
-                        fieldErrors.rows ? 'rows-error' : undefined
+                        fieldErrors.rows
+                          ? 'rows-error layout-hint'
+                          : 'layout-hint'
                       }
                       required
                     />
@@ -1073,8 +1076,8 @@ export function SessionEditor({
                       aria-invalid={Boolean(fieldErrors.seatsPerRow)}
                       aria-describedby={
                         fieldErrors.seatsPerRow
-                          ? 'seats-per-row-error'
-                          : undefined
+                          ? 'seats-per-row-error layout-hint'
+                          : 'layout-hint'
                       }
                       required
                     />

@@ -631,7 +631,17 @@ export function App() {
     authState.status === 'authenticated' ? authState.accessToken : undefined
 
   return (
-    <div className="public-shell">
+    /*
+     * A rota de sessão fixa a barra de reserva no rodapé em telas estreitas. O
+     * modificador reserva a altura dessa barra no fim da página, senão o
+     * rodapé — incluindo a atribuição obrigatória da TMDb — termina embaixo
+     * dela e nunca chega a ser visto.
+     */
+    <div
+      className={`public-shell${
+        route.name === 'session' ? ' has-booking-bar' : ''
+      }`}
+    >
       <PublicHeader
         user={customer}
         onHome={openHome}

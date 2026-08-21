@@ -212,49 +212,85 @@ export function TicketList({
           <button type="button" onClick={onBack}>Ver programação</button>
         </div>
       ) : (
-        <div className="my-ticket-list">
-          {tickets.map((ticket) => {
-            const posterUrl = tmdbPosterUrl(ticket.session.movie.posterPath)
-
-            return (
-              <article className="my-ticket-card" key={ticket.id}>
-                <PosterImage
-                  src={posterUrl}
-                  title={ticket.session.movie.title}
-                  className="my-ticket-poster"
-                  loading="lazy"
-                />
-                <div className="my-ticket-card-body">
-                  <div>
-                    <p className="section-kicker">Assento {ticket.seat.label}</p>
-                    <h2>{ticket.session.movie.title}</h2>
-                  </div>
-                  <dl>
-                    <div>
-                      <dt>Sessão</dt>
-                      <dd>{formatSessionDate(ticket.session.startsAt)}</dd>
-                    </div>
-                    <div>
-                      <dt>Local</dt>
-                      <dd>{ticket.session.venueName}, {ticket.session.roomName}</dd>
-                    </div>
-                  </dl>
-                  <div className="ticket-card-footer">
-                    <span className={`ticket-status-badge ticket-status-${ticket.status.toLowerCase()}`}>
-                      {ticket.status === 'VALID' ? 'Válido' : 'Utilizado'}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => onOpenTicket(ticket.id)}
-                      aria-label={`Abrir ingresso para ${ticket.session.movie.title}, assento ${ticket.seat.label}`}
-                    >
-                      Abrir ingresso
-                    </button>
-                  </div>
+        <div className="ticket-purchase-list">
+          {ticketGroups.map((group) => (
+            <section
+              className="ticket-purchase-group"
+              key={group.reservation.id}
+              aria-label={`Compra com ${ticketCountLabel(group.reservation.ticketCount)}`}
+            >
+              <header className="ticket-purchase-heading">
+                <div>
+                  <p className="section-kicker">Compra</p>
+                  <p className="ticket-purchase-summary">
+                    {ticketCountLabel(group.reservation.ticketCount)} ·{' '}
+                    {group.tickets.length === 1 ? 'Assento' : 'Assentos'}{' '}
+                    {group.tickets.map((ticket) => ticket.seat.label).join(', ')}
+                  </p>
                 </div>
-              </article>
-            )
-          })}
+                {group.reservation.canCancel ? (
+                  <button
+                    type="button"
+                    className="danger-text-button"
+                    onClick={() => void cancelPurchase(group)}
+                    disabled={cancellingReservationId !== null}
+                  >
+                    {cancellingReservationId === group.reservation.id
+                      ? 'Cancelando compra…'
+                      : 'Cancelar compra'}
+                  </button>
+                ) : group.reservation.status === 'CANCELLED' ? (
+                  <span className="ticket-purchase-state">Compra cancelada</span>
+                ) : null}
+              </header>
+
+              <div className="my-ticket-list">
+                {group.tickets.map((ticket) => {
+                  const posterUrl = tmdbPosterUrl(ticket.session.movie.posterPath)
+                  const isCancelled = ticket.status === 'CANCELLED'
+
+                  return (
+                    <article className="my-ticket-card" key={ticket.id}>
+                      <PosterImage
+                        src={posterUrl}
+                        title={ticket.session.movie.title}
+                        className="my-ticket-poster"
+                        loading="lazy"
+                      />
+                      <div className="my-ticket-card-body">
+                        <div>
+                          <p className="section-kicker">Assento {ticket.seat.label}</p>
+                          <h2>{ticket.session.movie.title}</h2>
+                        </div>
+                        <dl>
+                          <div>
+                            <dt>Sessão</dt>
+                            <dd>{formatSessionDate(ticket.session.startsAt)}</dd>
+                          </div>
+                          <div>
+                            <dt>Local</dt>
+                            <dd>{ticket.session.venueName}, {ticket.session.roomName}</dd>
+                          </div>
+                        </dl>
+                        <div className="ticket-card-footer">
+                          <span className={`ticket-status-badge ticket-status-${ticket.status.toLowerCase()}`}>
+                            {ticketStatusLabels[ticket.status]}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => onOpenTicket(ticket.id)}
+                            aria-label={`${isCancelled ? 'Ver detalhes do' : 'Abrir'} ingresso para ${ticket.session.movie.title}, assento ${ticket.seat.label}`}
+                          >
+                            {isCancelled ? 'Ver detalhes' : 'Abrir ingresso'}
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+            </section>
+          ))}
         </div>
       )}
     </div>

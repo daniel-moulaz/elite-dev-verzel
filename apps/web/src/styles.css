@@ -2,7 +2,7 @@
   color: #f4f0e8;
   background: #0d0d0d;
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+   ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -727,13 +727,13 @@ html.is-offline .login-shell {
   justify-items: start;
   gap: 0.7rem;
   margin-inline: auto;
-  border-left: 3px solid #5c5c5c;
+  border-top: 3px solid #5c5c5c;
   padding: 1.75rem;
   background: var(--surface);
 }
 
 .content-state[aria-busy="true"] {
-  border-left-color: var(--brand);
+  border-top-color: var(--brand);
 }
 
 .content-state[aria-busy="true"]::before {
@@ -746,12 +746,12 @@ html.is-offline .login-shell {
 
 .error-state,
 .content-state[role="alert"] {
-  border-left-color: var(--danger);
+  border-top-color: var(--danger);
   background: #211414;
 }
 
 .empty-state {
-  border-left-color: #77736d;
+  border-top-color: #77736d;
 }
 
 .state-symbol,
@@ -876,33 +876,11 @@ html.is-offline .login-shell {
   isolation: isolate;
 }
 
-.login-shell::before {
-  position: fixed;
-  inset: 0 auto 0 0;
-  width: 0.45rem;
-  background: var(--brand);
-  content: "";
-}
-
-.login-shell::after {
-  position: fixed;
-  z-index: -1;
-  inset: 0;
-  background:
-    radial-gradient(circle at 50% 40%, #e4472f17 0 1px, transparent 1.5px)
-      0 0 / 18px 18px,
-    radial-gradient(ellipse at 52% 46%, #d84b3430, transparent 38%);
-  content: "";
-  mask-image: linear-gradient(90deg, transparent, #000 22% 78%, transparent);
-  opacity: 0.72;
-}
-
 .auth-panel {
   width: min(100%, 39rem);
   border-top: 3px solid var(--brand);
   padding: clamp(1.35rem, 4vw, 2.2rem);
   background: var(--surface);
-  box-shadow: 0 1.5rem 5rem #0008;
 }
 
 .password-field {
@@ -1873,9 +1851,9 @@ html.is-offline .login-shell {
 }
 
 .programming-board .content-state[role="alert"] {
+  border-top: 0.35rem solid var(--danger);
   color: #481d18;
   background: #efd6d1;
-  box-shadow: inset 0.35rem 0 0 var(--danger);
 }
 
 .programming-board .empty-state {
@@ -2493,7 +2471,6 @@ html.is-offline .login-shell {
   justify-content: space-between;
   gap: 1.5rem;
   margin-top: 1rem;
-  border-left: 3px solid var(--brand);
   padding: 1.15rem 1.25rem;
   background: var(--surface-raised);
 }
@@ -2538,7 +2515,6 @@ html.is-offline .login-shell {
   grid-template-columns: 6rem minmax(0, 1fr);
   min-width: 0;
   overflow: hidden;
-  border-left: 3px solid var(--brand);
   background: var(--surface);
 }
 
@@ -3030,7 +3006,6 @@ html.is-offline .login-shell {
   align-items: end;
   gap: 0.85rem 1.25rem;
   margin-bottom: 1rem;
-  border-left: 3px solid var(--brand);
   padding: 1rem;
   background: var(--surface);
 }
@@ -3096,16 +3071,16 @@ html.is-offline .login-shell {
   grid-template-columns: 5.5rem minmax(0, 1fr);
   min-width: 0;
   overflow: hidden;
-  border-left: 3px solid #515151;
+  border-top: 3px solid #515151;
   background: var(--surface);
 }
 
 .session-published {
-  border-left-color: var(--success);
+  border-top-color: var(--success);
 }
 
 .session-draft {
-  border-left-color: var(--warning);
+  border-top-color: var(--warning);
 }
 
 .session-poster {
@@ -3303,7 +3278,7 @@ html.is-offline .login-shell {
   grid-template-columns: 5rem minmax(0, 1fr);
   gap: 1rem;
   margin-top: 1rem;
-  border-left: 3px solid var(--brand);
+  border-top: 3px solid var(--brand);
   padding: 0.8rem;
   background: var(--surface);
 }
@@ -3771,13 +3746,13 @@ html.is-offline .login-shell {
   place-content: center;
   justify-items: start;
   gap: 0.65rem;
-  border-left: 4px solid #69706b;
+  border-top: 4px solid #69706b;
   padding: 1.5rem;
   background: #fff;
 }
 
 .gate-error {
-  border-left-color: var(--danger);
+  border-top-color: var(--danger);
   background: #fff4f2;
 }
 
@@ -3800,7 +3775,6 @@ html.is-offline .login-shell {
   min-height: 6.7rem;
   overflow: hidden;
   border: 1px solid var(--gate-line);
-  border-left: 4px solid #555b57;
   border-radius: 0;
   padding: 0;
   color: #171918;
@@ -3809,8 +3783,7 @@ html.is-offline .login-shell {
 }
 
 .gate-session-card:hover:not(:disabled) {
-  border-color: #9aa09b;
-  border-left-color: var(--brand);
+  border-color: var(--brand);
   color: #171918;
   background: #fff;
   transform: translateY(-1px);
@@ -3867,10 +3840,9 @@ html.is-offline .login-shell {
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 0.85rem;
-  border-left: 4px solid var(--brand);
+  border-top: 4px solid var(--brand);
   padding: 0.85rem 1rem;
   background: #fff;
-  box-shadow: 0 0.35rem 1.2rem #2f37321c;
 }
 
 .selected-gate-session h1 {
@@ -4725,8 +4697,18 @@ html.is-offline .login-shell {
     font-size: 1.55rem;
   }
 
+  /*
+   * A coluna de texto do hero fica em ~217px a 375px, e o rótulo completo
+   * caía para 8.96px em três linhas dentro do CTA principal. O aria-label do
+   * botão já carrega "escolher lugares", então na largura mínima fica só o
+   * preço, em corpo legível.
+   */
   .stage-showtime-button span {
-    font-size: 0.56rem;
+    font-size: 0.7rem;
+  }
+
+  .stage-showtime-cta {
+    display: none;
   }
 
   .stage-loading-copy span:first-child {
@@ -5218,6 +5200,15 @@ html.is-offline .login-shell {
 
   .selection-summary {
     display: none;
+  }
+
+  /*
+   * Altura reservada para a barra fixa de reserva. Sem isso, os últimos ~70px
+   * da página — o rodapé e a atribuição da TMDb — ficam permanentemente
+   * embaixo dela no fim do scroll.
+   */
+  .public-shell.has-booking-bar {
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom));
   }
 
   .mobile-booking-bar {

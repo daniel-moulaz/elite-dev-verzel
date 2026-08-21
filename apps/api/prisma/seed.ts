@@ -25,6 +25,7 @@ config({
 
 const DEMO_RESERVATION_ID = '33333333-3333-4333-8333-333333333333'
 const DEMO_PAYMENT_ID = '44444444-4444-4444-8444-444444444444'
+const DEMO_TICKET_PRICE_CENTS = 2600
 
 const SAO_PAULO_OFFSET = '-03:00'
 const saoPauloCalendar = new Intl.DateTimeFormat('en-CA', {
@@ -65,7 +66,211 @@ const movieSnapshots = {
     movieReleaseDate: new Date('1972-03-24T00:00:00.000Z'),
     movieRuntimeMinutes: 175,
   },
+  dune: {
+    tmdbMovieId: 693134,
+    movieTitle: 'Duna: Parte Dois',
+    movieOverview:
+      'Paul Atreides se une aos Fremen para vingar sua família e enfrentar o destino que viu em visões.',
+    moviePosterPath: '/8LJJjLjAzAwXS40S5mx79PJ2jSs.jpg',
+    movieBackdropPath: '/eZ239CUp1d6OryZEBPnO2n87gMG.jpg',
+    movieReleaseDate: new Date('2024-02-27T00:00:00.000Z'),
+    movieRuntimeMinutes: 166,
+  },
+  cityOfGod: {
+    tmdbMovieId: 598,
+    movieTitle: 'Cidade de Deus',
+    movieOverview:
+      'Buscapé cresce cercado pela violência e enxerga na fotografia a sua saída da Cidade de Deus.',
+    moviePosterPath: '/gfnXixcGC060QcG6JPxN6AMdVsq.jpg',
+    movieBackdropPath: '/uvitbjFU4JqvMwIkMWHp69bmUzG.jpg',
+    movieReleaseDate: new Date('2002-08-30T00:00:00.000Z'),
+    movieRuntimeMinutes: 130,
+  },
 } as const
+
+// Cada sala tem local, endereço e layout fixos. Repetir a sala em vários
+// horários mantém a grade plausível sem redeclarar esses dados por sessão.
+const demoRooms = {
+  marfim: {
+    venueName: 'SEPTEM Paulista',
+    address: 'Avenida Paulista, 1000 — São Paulo, SP',
+    roomName: 'Sala Marfim',
+    rows: 4,
+    seatsPerRow: 8,
+  },
+  cobre: {
+    venueName: 'SEPTEM Paulista',
+    address: 'Avenida Paulista, 1000 — São Paulo, SP',
+    roomName: 'Sala Cobre',
+    rows: 6,
+    seatsPerRow: 10,
+  },
+  rubi: {
+    venueName: 'SEPTEM Pinheiros',
+    address: 'Rua dos Pinheiros, 1000 — São Paulo, SP',
+    roomName: 'Sala Rubi',
+    rows: 5,
+    seatsPerRow: 8,
+  },
+  horizonte: {
+    venueName: 'SEPTEM Pinheiros',
+    address: 'Rua dos Pinheiros, 1000 — São Paulo, SP',
+    roomName: 'Sala Horizonte',
+    rows: 5,
+    seatsPerRow: 8,
+  },
+} as const
+
+// Programação demo: três dias de exibição, cinco filmes, dois cinemas e quatro
+// salas. Os horários seguem uma grade real de cinema, e cada sala respeita a
+// duração do filme entre uma sessão e a seguinte. Somente a sessão de Matrix
+// das 15:40 carrega histórico comercial; as demais nascem limpas e editáveis.
+const demoSessions = [
+  {
+    id: DEMO_SESSION_IDS.matrixTicket,
+    status: SessionStatus.PUBLISHED,
+    dayOffset: 2,
+    localTime: '15:40',
+    room: demoRooms.marfim,
+    priceCents: DEMO_TICKET_PRICE_CENTS,
+    movie: movieSnapshots.matrix,
+  },
+  {
+    id: DEMO_SESSION_IDS.interstellarEarly,
+    status: SessionStatus.PUBLISHED,
+    dayOffset: 2,
+    localTime: '16:20',
+    room: demoRooms.cobre,
+    priceCents: 3000,
+    movie: movieSnapshots.interstellar,
+  },
+  {
+    id: DEMO_SESSION_IDS.matrixMiddle,
+    status: SessionStatus.PUBLISHED,
+    dayOffset: 2,
+    localTime: '18:40',
+    room: demoRooms.marfim,
+    priceCents: 2800,
+    movie: movieSnapshots.matrix,
+  },
+  {
+    id: DEMO_SESSION_IDS.duneEarly,
+    status: SessionStatus.PUBLISHED,
+    dayOffset: 2,
+    localTime: '18:50',
+    room: demoRooms.rubi,
+    priceCents: 3200,
+    movie: movieSnapshots.dune,
+  },
+  {
+    id: DEMO_SESSION_IDS.interstellarLate,
+    status: SessionStatus.PUBLISHED,
+    dayOffset: 2,
+    localTime: '19:40',
+    room: demoRooms.cobre,
+    priceCents: 3200,
+    movie: movieSnapshots.interstellar,
+  },
+  {
+    id: DEMO_SESSION_IDS.matrixLate,
+    status: SessionStatus.PUBLISHED,
+    dayOffset: 2,
+    localTime: '21:20',
+    room: demoRooms.marfim,
+    priceCents: 2800,
+    movie: movieSnapshots.matrix,
+  },
+  {
+    id: DEMO_SESSION_IDS.cityOfGodMatinee,
+    status: SessionStatus.PUBLISHED,
+    dayOffset: 3,
+    localTime: '13:40',
+    room: demoRooms.marfim,
+    priceCents: 2200,
+    movie: movieSnapshots.cityOfGod,
+  },
+  {
+    id: DEMO_SESSION_IDS.godfatherEarly,
+    status: SessionStatus.PUBLISHED,
+    dayOffset: 3,
+    localTime: '16:50',
+    room: demoRooms.rubi,
+    priceCents: 2900,
+    movie: movieSnapshots.godfather,
+  },
+  {
+    id: DEMO_SESSION_IDS.interstellarSecondDay,
+    status: SessionStatus.PUBLISHED,
+    dayOffset: 3,
+    localTime: '18:15',
+    room: demoRooms.cobre,
+    priceCents: 3000,
+    movie: movieSnapshots.interstellar,
+  },
+  {
+    id: DEMO_SESSION_IDS.duneSecondDay,
+    status: SessionStatus.PUBLISHED,
+    dayOffset: 3,
+    localTime: '19:20',
+    room: demoRooms.horizonte,
+    priceCents: 3100,
+    movie: movieSnapshots.dune,
+  },
+  {
+    id: DEMO_SESSION_IDS.godfatherLate,
+    status: SessionStatus.PUBLISHED,
+    dayOffset: 3,
+    localTime: '20:15',
+    room: demoRooms.rubi,
+    priceCents: 3100,
+    movie: movieSnapshots.godfather,
+  },
+  {
+    id: DEMO_SESSION_IDS.cityOfGodThirdDay,
+    status: SessionStatus.PUBLISHED,
+    dayOffset: 4,
+    localTime: '16:30',
+    room: demoRooms.marfim,
+    priceCents: 2400,
+    movie: movieSnapshots.cityOfGod,
+  },
+  {
+    id: DEMO_SESSION_IDS.duneThirdDay,
+    status: SessionStatus.PUBLISHED,
+    dayOffset: 4,
+    localTime: '21:05',
+    room: demoRooms.cobre,
+    priceCents: 3300,
+    movie: movieSnapshots.dune,
+  },
+  {
+    id: DEMO_SESSION_IDS.matrixNight,
+    status: SessionStatus.PUBLISHED,
+    dayOffset: 4,
+    localTime: '22:40',
+    room: demoRooms.rubi,
+    priceCents: 2500,
+    movie: movieSnapshots.matrix,
+  },
+  {
+    id: DEMO_SESSION_IDS.godfatherDraft,
+    status: SessionStatus.DRAFT,
+    dayOffset: 4,
+    localTime: '14:10',
+    room: demoRooms.horizonte,
+    priceCents: 2700,
+    movie: movieSnapshots.godfather,
+  },
+  {
+    id: DEMO_SESSION_IDS.cityOfGodDraft,
+    status: SessionStatus.DRAFT,
+    dayOffset: 5,
+    localTime: '20:35',
+    room: demoRooms.cobre,
+    priceCents: 2800,
+    movie: movieSnapshots.cityOfGod,
+  },
+] as const
 
 function saoPauloDatePart(
   value: Date,
@@ -155,126 +360,20 @@ async function seed() {
 
     const seedNow = new Date()
     const publishedAt = seedNow
-    const demoSessions = [
-      {
-        id: DEMO_SESSION_IDS.matrixTicket,
-        status: SessionStatus.PUBLISHED,
-        startsAt: demoStartsAt(seedNow, 2, '15:30'),
-        venueName: 'SEPTEM Paulista',
-        roomName: 'Sala Marfim',
-        address: 'Avenida Paulista, 1000 — São Paulo, SP',
-        priceCents: 2600,
-        rows: 4,
-        seatsPerRow: 8,
-        movie: movieSnapshots.matrix,
-      },
-      {
-        id: DEMO_SESSION_IDS.interstellarEarly,
-        status: SessionStatus.PUBLISHED,
-        startsAt: demoStartsAt(seedNow, 2, '16:00'),
-        venueName: 'SEPTEM Paulista',
-        roomName: 'Sala Cobre',
-        address: 'Avenida Paulista, 1000 — São Paulo, SP',
-        priceCents: 3000,
-        rows: 6,
-        seatsPerRow: 10,
-        movie: movieSnapshots.interstellar,
-      },
-      {
-        id: DEMO_SESSION_IDS.matrixMiddle,
-        status: SessionStatus.PUBLISHED,
-        startsAt: demoStartsAt(seedNow, 2, '18:30'),
-        venueName: 'SEPTEM Paulista',
-        roomName: 'Sala Marfim',
-        address: 'Avenida Paulista, 1000 — São Paulo, SP',
-        priceCents: 2800,
-        rows: 4,
-        seatsPerRow: 8,
-        movie: movieSnapshots.matrix,
-      },
-      {
-        id: DEMO_SESSION_IDS.interstellarLate,
-        status: SessionStatus.PUBLISHED,
-        startsAt: demoStartsAt(seedNow, 2, '20:00'),
-        venueName: 'SEPTEM Paulista',
-        roomName: 'Sala Cobre',
-        address: 'Avenida Paulista, 1000 — São Paulo, SP',
-        priceCents: 3200,
-        rows: 6,
-        seatsPerRow: 10,
-        movie: movieSnapshots.interstellar,
-      },
-      {
-        id: DEMO_SESSION_IDS.matrixLate,
-        status: SessionStatus.PUBLISHED,
-        startsAt: demoStartsAt(seedNow, 2, '21:30'),
-        venueName: 'SEPTEM Paulista',
-        roomName: 'Sala Marfim',
-        address: 'Avenida Paulista, 1000 — São Paulo, SP',
-        priceCents: 2800,
-        rows: 4,
-        seatsPerRow: 8,
-        movie: movieSnapshots.matrix,
-      },
-      {
-        id: DEMO_SESSION_IDS.godfatherEarly,
-        status: SessionStatus.PUBLISHED,
-        startsAt: demoStartsAt(seedNow, 3, '16:30'),
-        venueName: 'SEPTEM Pinheiros',
-        roomName: 'Sala Rubi',
-        address: 'Rua dos Pinheiros, 1000 — São Paulo, SP',
-        priceCents: 2900,
-        rows: 5,
-        seatsPerRow: 8,
-        movie: movieSnapshots.godfather,
-      },
-      {
-        id: DEMO_SESSION_IDS.interstellarSecondDay,
-        status: SessionStatus.PUBLISHED,
-        startsAt: demoStartsAt(seedNow, 3, '19:30'),
-        venueName: 'SEPTEM Paulista',
-        roomName: 'Sala Cobre',
-        address: 'Avenida Paulista, 1000 — São Paulo, SP',
-        priceCents: 3000,
-        rows: 6,
-        seatsPerRow: 10,
-        movie: movieSnapshots.interstellar,
-      },
-      {
-        id: DEMO_SESSION_IDS.godfatherLate,
-        status: SessionStatus.PUBLISHED,
-        startsAt: demoStartsAt(seedNow, 3, '20:00'),
-        venueName: 'SEPTEM Pinheiros',
-        roomName: 'Sala Rubi',
-        address: 'Rua dos Pinheiros, 1000 — São Paulo, SP',
-        priceCents: 3100,
-        rows: 5,
-        seatsPerRow: 8,
-        movie: movieSnapshots.godfather,
-      },
-      {
-        id: DEMO_SESSION_IDS.godfatherDraft,
-        status: SessionStatus.DRAFT,
-        startsAt: demoStartsAt(seedNow, 3, '14:00'),
-        venueName: 'SEPTEM Pinheiros',
-        roomName: 'Sala Horizonte',
-        address: 'Rua dos Pinheiros, 1000 — São Paulo, SP',
-        priceCents: 2700,
-        rows: 5,
-        seatsPerRow: 8,
-        movie: movieSnapshots.godfather,
-      },
-    ] as const
 
     await prisma.$transaction(async (transaction) => {
       for (const demoSession of demoSessions) {
         const sessionData = {
           organizerId: organizer.id,
           status: demoSession.status,
-          startsAt: demoSession.startsAt,
-          venueName: demoSession.venueName,
-          roomName: demoSession.roomName,
-          address: demoSession.address,
+          startsAt: demoStartsAt(
+            seedNow,
+            demoSession.dayOffset,
+            demoSession.localTime,
+          ),
+          venueName: demoSession.room.venueName,
+          roomName: demoSession.room.roomName,
+          address: demoSession.room.address,
           priceCents: demoSession.priceCents,
           ...demoSession.movie,
           publishedAt:
@@ -291,8 +390,8 @@ async function seed() {
 
         await transaction.seat.createMany({
           data: seatLayout(
-            demoSession.rows,
-            demoSession.seatsPerRow,
+            demoSession.room.rows,
+            demoSession.room.seatsPerRow,
           ).map((seat) => ({
             sessionId: demoSession.id,
             ...seat,
@@ -318,28 +417,41 @@ async function seed() {
           sessionId: DEMO_SESSION_IDS.matrixTicket,
           status: ReservationStatus.PAID,
           expiresAt: new Date(seedNow.getTime() + 60 * 60 * 1_000),
-          totalCents: 2600,
+          totalCents: DEMO_TICKET_PRICE_CENTS,
         },
         update: {
-          status: ReservationStatus.PAID,
-          totalCents: 2600,
+          totalCents: DEMO_TICKET_PRICE_CENTS,
         },
       })
 
-      const reservationSeat = await transaction.reservationSeat.upsert({
-        where: {
-          reservationId_seatId: {
-            reservationId: DEMO_RESERVATION_ID,
-            seatId: demoTicketSeat.id,
+      const existingReservationSeat =
+        await transaction.reservationSeat.findUnique({
+          where: {
+            reservationId_seatId: {
+              reservationId: DEMO_RESERVATION_ID,
+              seatId: demoTicketSeat.id,
+            },
           },
-        },
-        create: {
-          reservationId: DEMO_RESERVATION_ID,
-          seatId: demoTicketSeat.id,
-          unitPriceCents: 2600,
-        },
-        update: { unitPriceCents: 2600 },
-      })
+        })
+      const reservationSeat = existingReservationSeat
+        ? await transaction.reservationSeat.update({
+            where: { id: existingReservationSeat.id },
+            data: { unitPriceCents: DEMO_TICKET_PRICE_CENTS },
+          })
+        : await transaction.reservationSeat.create({
+            data: {
+              reservationId: DEMO_RESERVATION_ID,
+              seatId: demoTicketSeat.id,
+              unitPriceCents: DEMO_TICKET_PRICE_CENTS,
+            },
+          })
+
+      if (reservationSeat.releasedAt === null) {
+        await transaction.reservation.update({
+          where: { id: DEMO_RESERVATION_ID },
+          data: { status: ReservationStatus.PAID },
+        })
+      }
 
       await transaction.payment.upsert({
         where: { reservationId: DEMO_RESERVATION_ID },
@@ -347,31 +459,40 @@ async function seed() {
           id: DEMO_PAYMENT_ID,
           reservationId: DEMO_RESERVATION_ID,
           status: PaymentStatus.APPROVED,
-          amountCents: 2600,
-        },
-        update: { status: PaymentStatus.APPROVED, amountCents: 2600 },
-      })
-
-      await transaction.ticket.upsert({
-        where: { reservationSeatId: reservationSeat.id },
-        create: {
-          id: DEMO_TICKET_ID,
-          reservationSeatId: reservationSeat.id,
-          sessionId: DEMO_SESSION_IDS.matrixTicket,
-          ownerId: customerTwo.id,
-          status: TicketStatus.VALID,
-          manualCode: generateManualCode(),
+          amountCents: DEMO_TICKET_PRICE_CENTS,
         },
         update: {
-          status: TicketStatus.VALID,
-          usedAt: null,
-          usedByGateId: null,
+          status: PaymentStatus.APPROVED,
+          amountCents: DEMO_TICKET_PRICE_CENTS,
         },
       })
+
+      if (reservationSeat.releasedAt === null) {
+        await transaction.ticket.upsert({
+          where: { reservationSeatId: reservationSeat.id },
+          create: {
+            id: DEMO_TICKET_ID,
+            reservationSeatId: reservationSeat.id,
+            sessionId: DEMO_SESSION_IDS.matrixTicket,
+            ownerId: customerTwo.id,
+            status: TicketStatus.VALID,
+            manualCode: generateManualCode(),
+          },
+          update: {
+            status: TicketStatus.VALID,
+            usedAt: null,
+            usedByGateId: null,
+          },
+        })
+      }
     })
 
+    const publishedCount = demoSessions.filter(
+      ({ status }) => status === SessionStatus.PUBLISHED,
+    ).length
+
     console.log(
-      `${usersWithHashes.length} usuários, 8 sessões publicadas, 1 rascunho e 1 ingresso de demonstração preparados.`,
+      `${usersWithHashes.length} usuários, ${publishedCount} sessões publicadas, ${demoSessions.length - publishedCount} rascunhos e 1 ingresso de demonstração preparados.`,
     )
   } finally {
     await prisma.$disconnect()

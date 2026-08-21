@@ -68,7 +68,12 @@ export function ReservationSummary({
   )
   const [reloadKey, setReloadKey] = useState(0)
   const [paymentAction, setPaymentAction] = useState<PaymentStatus | null>(null)
+  // `CANCELLED` cobre duas histórias diferentes: pagamento recusado agora e
+  // compra paga que o cliente cancelou depois. O payload da reserva não traz o
+  // pagamento, então só afirmamos "recusado" quando a recusa aconteceu aqui.
+  const [wasDeclinedHere, setWasDeclinedHere] = useState(false)
   const [issuedTicketId, setIssuedTicketId] = useState<string | null>(null)
+  const [issuedTicketCount, setIssuedTicketCount] = useState(0)
   const [isCheckingExpiration, setIsCheckingExpiration] = useState(false)
   const [isSynchronizing, setIsSynchronizing] = useState(
     Boolean(initialReservation),
@@ -205,7 +210,9 @@ export function ReservationSummary({
             }
           : current,
       )
+      setWasDeclinedHere(result.reservation.status === 'CANCELLED')
       setIssuedTicketId(result.tickets[0]?.id ?? null)
+      setIssuedTicketCount(result.tickets.length)
       setIsCheckingExpiration(false)
     } catch (error) {
       setErrorMessage(
@@ -300,7 +307,9 @@ export function ReservationSummary({
                 : isPaid
                   ? 'Pagamento aprovado'
                   : isCancelled
-                    ? 'Pagamento recusado'
+                    ? wasDeclinedHere
+                      ? 'Pagamento recusado'
+                      : 'Reserva encerrada'
                     : isCheckingExpiration
                       ? 'Confirmando prazo'
                     : 'Lugares reservados'}
@@ -312,7 +321,9 @@ export function ReservationSummary({
                 : isPaid
                   ? 'Pagamento simulado aprovado. Seus ingressos foram emitidos.'
                   : isCancelled
-                    ? 'Pagamento simulado recusado. Nenhum ingresso foi emitido e os lugares foram liberados.'
+                    ? wasDeclinedHere
+                      ? 'Pagamento simulado recusado. Nenhum ingresso foi emitido e os lugares foram liberados.'
+                      : 'Esta reserva não está mais ativa e os lugares voltaram para o mapa da sessão.'
                     : isCheckingExpiration
                       ? 'O contador chegou a zero. Estamos confirmando o estado da reserva com o servidor.'
                       : deadlineReachedLocally
@@ -380,7 +391,9 @@ export function ReservationSummary({
               : isPaid
                 ? 'APROVADO'
                 : isCancelled
-                  ? 'RECUSADO'
+                  ? wasDeclinedHere
+                    ? 'RECUSADO'
+                    : 'ENCERRADA'
                   : isCheckingExpiration
                     ? 'AGUARDE'
                   : formatRemainingTime(remainingMilliseconds)}
@@ -425,13 +438,17 @@ export function ReservationSummary({
         </button>
       ) : isPaid ? (
         <div className="payment-result-actions">
-          {issuedTicketId ? (
+          {issuedTicketId && issuedTicketCount === 1 ? (
             <button type="button" onClick={() => onOpenTicket(issuedTicketId)}>
               Ver meu ingresso
             </button>
           ) : null}
-          <button type="button" className="secondary-button" onClick={onOpenTickets}>
-            Meus ingressos
+          <button
+            type="button"
+            className={issuedTicketCount === 1 ? 'secondary-button' : undefined}
+            onClick={onOpenTickets}
+          >
+            {issuedTicketCount > 1 ? 'Ver ingressos da compra' : 'Meus ingressos'}
           </button>
         </div>
       ) : (
