@@ -1,4 +1,8 @@
 import { Prisma } from '../../generated/prisma/client.js'
+import {
+  ReservationStatus,
+  TicketStatus,
+} from '../../generated/prisma/enums.js'
 import { HttpError } from '../../http/error-response.js'
 import { prisma } from '../../lib/prisma.js'
 import { signTicketToken } from './ticket-crypto.js'
@@ -28,6 +32,19 @@ export const ticketDetails = {
           number: true,
         },
       },
+      reservation: {
+        select: {
+          id: true,
+          status: true,
+          seats: {
+            select: {
+              ticket: {
+                select: { status: true },
+              },
+            },
+          },
+        },
+      },
     },
   },
   sharedLink: {
@@ -50,7 +67,8 @@ export function toTicketResponse(ticket: TicketWithDetails) {
   return {
     id: ticket.id,
     status: ticket.status,
-    manualCode: ticket.manualCode,
+    manualCode:
+      ticket.status === TicketStatus.CANCELLED ? null : ticket.manualCode,
     issuedAt: ticket.issuedAt,
     session: {
       id: ticket.session.id,
@@ -69,10 +87,41 @@ export function toTicketResponse(ticket: TicketWithDetails) {
   }
 }
 
+function toOwnedTicketResponse(ticket: TicketWithDetails) {
+  const reservation = ticket.reservationSeat.reservation
+  const reservationTickets = reservation.seats.flatMap(({ ticket }) =>
+    ticket ? [ticket] : [],
+  )
+  const isFutureSession = ticket.session.startsAt.getTime() > Date.now()
+  const isReservationPaid = reservation.status === ReservationStatus.PAID
+
+  return {
+    ...toTicketResponse(ticket),
+    canCancel:
+      ticket.status === TicketStatus.VALID &&
+      isReservationPaid &&
+      isFutureSession,
+    reservation: {
+      id: reservation.id,
+      status: reservation.status,
+      ticketCount: reservationTickets.length,
+      canCancel:
+        isReservationPaid &&
+        isFutureSession &&
+        reservationTickets.some(({ status }) => status === TicketStatus.VALID) &&
+        reservationTickets.every(({ status }) => status !== TicketStatus.USED),
+    },
+  }
+}
+
 export function createTicketQrToken(
   ticket: TicketWithDetails,
   signingSecret: string,
 ) {
+  if (ticket.status === TicketStatus.CANCELLED) {
+    return null
+  }
+
   return signTicketToken({
     ticketId: ticket.id,
     sessionId: ticket.session.id,
@@ -94,7 +143,7 @@ export async function listCustomerTickets(ownerId: string) {
   })
 
   return {
-    tickets: tickets.map(toTicketResponse),
+    tickets: tickets.map(toOwnedTicketResponse),
   }
 }
 
@@ -122,7 +171,7 @@ export async function getCustomerTicket(
   const ticket = await findOwnedTicketWithDetails(ticketId, ownerId)
 
   return {
-    ...toTicketResponse(ticket),
+    ...toOwnedTicketResponse(ticket),
     shareLink:
       ticket.sharedLink &&
       !ticket.sharedLink.revokedAt &&

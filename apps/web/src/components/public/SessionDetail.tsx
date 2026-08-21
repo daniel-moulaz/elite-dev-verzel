@@ -4,6 +4,7 @@ import {
   createReservation,
   getPublicSession,
   getSessionSeats,
+  sessionEventsUrl,
   type AuthenticatedUser,
   type PublicSessionDetail,
   type Reservation,
@@ -22,7 +23,13 @@ import { PosterImage } from '../common/PosterImage'
 import { useToast } from '../common/toast'
 
 const maximumSeatsPerReservation = 6
+/**
+ * O polling permanece como rede de segurança: se um evento SSE se perder ou a
+ * conexão cair, o mapa ainda converge para o estado autoritativo do servidor.
+ */
 const seatAvailabilityPollingMilliseconds = 8_000
+/** Teto defensivo para o refresh encadeado, evitando um laço infinito. */
+const maximumTrailingRefreshes = 8
 
 function joinSeatLabels(labels: string[]): string {
   if (labels.length <= 1) {
@@ -87,10 +94,14 @@ export function SessionDetail({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   const [failedBackdrop, setFailedBackdrop] = useState<string | null>(null)
+  const [realtimeStatus, setRealtimeStatus] = useState<
+    'idle' | 'live' | 'reconnecting'
+  >('idle')
   const seatsRef = useRef<SessionSeat[]>([])
   const selectedSeatIdsRef = useRef<Set<string>>(new Set())
   const refreshControllerRef = useRef<AbortController | null>(null)
   const refreshInFlightRef = useRef(false)
+  const refreshPendingRef = useRef(false)
   const reservationSubmissionRef = useRef(false)
   const mountedRef = useRef(true)
 
@@ -203,13 +214,16 @@ export function SessionDetail({
       clearCurrentMessage?: boolean
       notifyLostSeats?: boolean
     } = {}) => {
+      // Single-flight: uma segunda chamada durante um fetch em andamento não é
+      // descartada; ela marca o snapshot como sujo e o loop abaixo executa mais
+      // uma rodada ao terminar. Assim nenhuma invalidação se perde e uma
+      // resposta antiga nunca sobrescreve outra mais nova.
       if (refreshInFlightRef.current) {
+        refreshPendingRef.current = true
         return
       }
 
-      const controller = new AbortController()
       refreshInFlightRef.current = true
-      refreshControllerRef.current = controller
 
       if (source === 'manual') {
         setIsRefreshing(true)
@@ -219,70 +233,93 @@ export function SessionDetail({
       }
 
       try {
-        const refreshedSeats = await getSessionSeats(
-          sessionId,
-          controller.signal,
-        )
-        const currentSelection = selectedSeatIdsRef.current
-        const previousSeats = seatsRef.current
-        const availableIds = new Set(
-          refreshedSeats
-            .filter((seat) => seat.status === 'AVAILABLE')
-            .map((seat) => seat.id),
-        )
-        const unavailableSelectedIds = Array.from(currentSelection).filter(
-          (seatId) => !availableIds.has(seatId),
-        )
+        let remainingTrailingRefreshes = maximumTrailingRefreshes
 
-        if (!mountedRef.current || controller.signal.aborted) {
-          return
-        }
+        do {
+          refreshPendingRef.current = false
 
-        seatsRef.current = refreshedSeats
-        setSeats(refreshedSeats)
+          const controller = new AbortController()
+          refreshControllerRef.current = controller
 
-        if (unavailableSelectedIds.length > 0) {
-          const labelsById = new Map(
-            [...previousSeats, ...refreshedSeats].map((seat) => [
-              seat.id,
-              seat.label,
-            ]),
-          )
-          const next = new Set<string>()
+          try {
+            const refreshedSeats = await getSessionSeats(
+              sessionId,
+              controller.signal,
+            )
+            const currentSelection = selectedSeatIdsRef.current
+            const previousSeats = seatsRef.current
+            const availableIds = new Set(
+              refreshedSeats
+                .filter((seat) => seat.status === 'AVAILABLE')
+                .map((seat) => seat.id),
+            )
+            const unavailableSelectedIds = Array.from(currentSelection).filter(
+              (seatId) => !availableIds.has(seatId),
+            )
 
-          for (const seatId of currentSelection) {
-            if (availableIds.has(seatId)) {
-              next.add(seatId)
+            if (!mountedRef.current || controller.signal.aborted) {
+              return
+            }
+
+            seatsRef.current = refreshedSeats
+            setSeats(refreshedSeats)
+
+            if (unavailableSelectedIds.length > 0) {
+              const labelsById = new Map(
+                [...previousSeats, ...refreshedSeats].map((seat) => [
+                  seat.id,
+                  seat.label,
+                ]),
+              )
+              const next = new Set<string>()
+
+              for (const seatId of currentSelection) {
+                if (availableIds.has(seatId)) {
+                  next.add(seatId)
+                }
+              }
+
+              selectedSeatIdsRef.current = next
+              setSelectedSeatIds(next)
+
+              if (notifyLostSeats) {
+                const lostLabels = unavailableSelectedIds.map(
+                  (seatId) => labelsById.get(seatId) ?? 'Um lugar selecionado',
+                )
+                notify(unavailableSeatsMessage(lostLabels), 'info')
+              }
+            }
+          } catch (error) {
+            if (controller.signal.aborted || !mountedRef.current) {
+              return
+            }
+
+            if (source === 'manual') {
+              setMessage(
+                error instanceof ApiError
+                  ? error.message
+                  : 'Não foi possível atualizar os lugares.',
+              )
+            }
+
+            // Uma falha encerra a rodada; o polling continua como rede de
+            // segurança e evita um laço apertado de novas tentativas.
+            return
+          } finally {
+            if (refreshControllerRef.current === controller) {
+              refreshControllerRef.current = null
             }
           }
 
-          selectedSeatIdsRef.current = next
-          setSelectedSeatIds(next)
-
-          if (notifyLostSeats) {
-            const lostLabels = unavailableSelectedIds.map(
-              (seatId) => labelsById.get(seatId) ?? 'Um lugar selecionado',
-            )
-            notify(unavailableSeatsMessage(lostLabels), 'info')
-          }
-        }
-      } catch (error) {
-        if (
-          source === 'manual' &&
-          mountedRef.current &&
-          !controller.signal.aborted
-        ) {
-          setMessage(
-            error instanceof ApiError
-              ? error.message
-              : 'Não foi possível atualizar os lugares.',
-          )
-        }
+          remainingTrailingRefreshes -= 1
+        } while (
+          refreshPendingRef.current &&
+          remainingTrailingRefreshes > 0 &&
+          mountedRef.current
+        )
       } finally {
-        if (refreshControllerRef.current === controller) {
-          refreshControllerRef.current = null
-          refreshInFlightRef.current = false
-        }
+        refreshInFlightRef.current = false
+        refreshPendingRef.current = false
 
         if (source === 'manual' && mountedRef.current) {
           setIsRefreshing(false)
@@ -291,6 +328,64 @@ export function SessionDetail({
     },
     [notify, sessionId],
   )
+
+  useEffect(() => {
+    if (status !== 'ready' || typeof EventSource === 'undefined') {
+      return
+    }
+
+    const source = new EventSource(sessionEventsUrl(sessionId))
+
+    function handleInvalidation() {
+      // O evento nunca traz o estado dos assentos: ele apenas manda reconsultar
+      // o snapshot autoritativo do servidor.
+      void refreshAvailability({ source: 'background' })
+    }
+
+    function handleOpen() {
+      setRealtimeStatus('live')
+    }
+
+    function handleSync() {
+      setRealtimeStatus('live')
+      handleInvalidation()
+    }
+
+    function handleSessionChanged() {
+      // Dados estruturais mudaram (horário, local, preço, filme ou layout):
+      // reconsulta a sessão e o mapa, que continuam sendo a autoridade.
+      getPublicSession(sessionId)
+        .then((refreshed) => {
+          if (mountedRef.current) {
+            setSession(refreshed)
+          }
+        })
+        .catch(() => undefined)
+
+      handleInvalidation()
+    }
+
+    function handleError() {
+      // O EventSource reconecta sozinho; o polling cobre a janela offline.
+      setRealtimeStatus('reconnecting')
+    }
+
+    source.addEventListener('open', handleOpen)
+    source.addEventListener('sync', handleSync)
+    source.addEventListener('seats-changed', handleInvalidation)
+    source.addEventListener('session-changed', handleSessionChanged)
+    source.addEventListener('error', handleError)
+
+    return () => {
+      source.removeEventListener('open', handleOpen)
+      source.removeEventListener('sync', handleSync)
+      source.removeEventListener('seats-changed', handleInvalidation)
+      source.removeEventListener('session-changed', handleSessionChanged)
+      source.removeEventListener('error', handleError)
+      source.close()
+      setRealtimeStatus('idle')
+    }
+  }, [refreshAvailability, sessionId, status])
 
   useEffect(() => {
     if (status !== 'ready' || isSubmitting) {
@@ -372,6 +467,7 @@ export function SessionDetail({
     refreshControllerRef.current?.abort()
     refreshControllerRef.current = null
     refreshInFlightRef.current = false
+    refreshPendingRef.current = false
     setIsSubmitting(true)
     setMessage(null)
 
@@ -610,6 +706,17 @@ export function SessionDetail({
               {availableCount} de {session.capacity} lugares disponíveis. Limite
               de {maximumSeatsPerReservation} por reserva.
             </p>
+            {realtimeStatus === 'idle' ? null : (
+              <p
+                className="realtime-indicator"
+                data-state={realtimeStatus}
+                aria-live="polite"
+              >
+                {realtimeStatus === 'live'
+                  ? 'Atualizações em tempo real'
+                  : 'Reconectando atualizações'}
+              </p>
+            )}
           </div>
           <button
             type="button"

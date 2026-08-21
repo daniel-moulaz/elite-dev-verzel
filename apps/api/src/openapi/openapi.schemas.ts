@@ -49,11 +49,14 @@ const ticketSummaryProperties: SchemaProperties = {
   id: uuidSchema,
   status: {
     type: 'string',
-    enum: ['VALID', 'USED'],
+    enum: ['VALID', 'USED', 'CANCELLED'],
   },
   manualCode: {
     type: 'string',
+    nullable: true,
     pattern: '^[2-9A-HJKMNP-Z]{4}(?:-[2-9A-HJKMNP-Z]{4}){3}$',
+    description:
+      'Código de acesso. É null quando o ingresso foi cancelado.',
   },
   issuedAt: dateTimeSchema,
   session: {
@@ -99,6 +102,47 @@ const ticketSummaryProperties: SchemaProperties = {
   },
 }
 
+const ownedTicketProperties: SchemaProperties = {
+  ...ticketSummaryProperties,
+  canCancel: {
+    type: 'boolean',
+    description:
+      'Indica se este ingresso pode ser cancelado individualmente agora.',
+  },
+  reservation: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['id', 'status', 'ticketCount', 'canCancel'],
+    properties: {
+      id: uuidSchema,
+      status: {
+        type: 'string',
+        enum: ['PAID', 'CANCELLED'],
+      },
+      ticketCount: { type: 'integer', minimum: 1 },
+      canCancel: { type: 'boolean' },
+    },
+    oneOf: [
+      {
+        type: 'object',
+        required: ['status', 'canCancel'],
+        properties: {
+          status: { type: 'string', enum: ['PAID'] },
+          canCancel: { type: 'boolean' },
+        },
+      },
+      {
+        type: 'object',
+        required: ['status', 'canCancel'],
+        properties: {
+          status: { type: 'string', enum: ['CANCELLED'] },
+          canCancel: { type: 'boolean', enum: [false] },
+        },
+      },
+    ],
+  },
+}
+
 const schemaDefinitions = {
   ErrorResponse: {
     type: 'object',
@@ -120,6 +164,7 @@ const schemaDefinitions = {
           'MOVIE_NOT_FOUND',
           'SESSION_NOT_FOUND',
           'SESSION_NOT_EDITABLE',
+          'SESSION_LAYOUT_NOT_EDITABLE',
           'SESSION_ALREADY_PUBLISHED',
           'SESSION_NOT_PUBLISHABLE',
           'SEAT_UNAVAILABLE',
@@ -128,7 +173,14 @@ const schemaDefinitions = {
           'RESERVATION_NOT_FOUND',
           'PAYMENT_ALREADY_PROCESSED',
           'PAYMENT_NOT_AVAILABLE',
+          'RESERVATION_ALREADY_CANCELLED',
+          'RESERVATION_NOT_CANCELLABLE',
+          'RESERVATION_SESSION_STARTED',
+          'RESERVATION_HAS_USED_TICKET',
           'TICKET_NOT_FOUND',
+          'TICKET_NOT_SHAREABLE',
+          'TICKET_NOT_CANCELLABLE',
+          'TICKET_SESSION_STARTED',
           'SHARED_TICKET_NOT_FOUND',
           'SHARED_LINK_EXPIRED',
           'SHARED_LINK_REVOKED',
@@ -229,6 +281,8 @@ const schemaDefinitions = {
       'capacity',
       'rows',
       'seatsPerRow',
+      'editability',
+      'metrics',
     ],
     properties: {
       id: uuidSchema,
@@ -273,6 +327,80 @@ const schemaDefinitions = {
       capacity: { type: 'integer', minimum: 0 },
       rows: { type: 'integer', minimum: 0 },
       seatsPerRow: { type: 'integer', minimum: 0 },
+      editability: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['allowed', 'reason', 'layoutEditable'],
+        description:
+          'Política de edição estrutural derivada pelo backend com o relógio do PostgreSQL. O frontend apenas apresenta o resultado; a autorização real é sempre revalidada sob lock na própria edição.',
+        properties: {
+          allowed: { type: 'boolean' },
+          reason: {
+            type: 'string',
+            enum: [
+              'DRAFT',
+              'PUBLISHED_SAFE',
+              'SESSION_STARTED',
+              'ACTIVE_HOLD',
+              'COMMERCIAL_HISTORY',
+            ],
+            description:
+              'DRAFT e PUBLISHED_SAFE permitem edição. SESSION_STARTED, ACTIVE_HOLD e COMMERCIAL_HISTORY a bloqueiam.',
+          },
+          layoutEditable: {
+            type: 'boolean',
+            description:
+              'Falso quando existe qualquer alocação histórica de assento: o mapa não pode ser reconstruído sem apagar histórico, mesmo que os demais campos continuem editáveis.',
+          },
+        },
+      },
+      metrics: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'capacity',
+          'availableSeats',
+          'heldSeats',
+          'soldSeats',
+          'occupancyPercentage',
+          'simulatedRevenueCents',
+        ],
+        description:
+          'Métricas operacionais calculadas pelo backend em uma consulta agregada, sem nenhum dado pessoal.',
+        properties: {
+          capacity: {
+            type: 'integer',
+            minimum: 0,
+            description: 'Total de assentos da sessão.',
+          },
+          availableSeats: { type: 'integer', minimum: 0 },
+          heldSeats: {
+            type: 'integer',
+            minimum: 0,
+            description:
+              'Alocações ativas de reservas PENDING ainda dentro do prazo, medido pelo relógio do PostgreSQL.',
+          },
+          soldSeats: {
+            type: 'integer',
+            minimum: 0,
+            description:
+              'Alocações ainda ativas de reservas PAID. Um assento cancelado individualmente deixa de contar.',
+          },
+          occupancyPercentage: {
+            type: 'number',
+            minimum: 0,
+            maximum: 100,
+            description:
+              'soldSeats / capacity, com uma casa decimal. Vale 0 quando a sessão não tem assentos.',
+          },
+          simulatedRevenueCents: {
+            type: 'integer',
+            minimum: 0,
+            description:
+              'Receita operacional simulada vigente: soma de unitPriceCents apenas das alocações contadas em soldSeats. Não é o histórico financeiro bruto — o Payment APPROVED original permanece inalterado após um cancelamento.',
+          },
+        },
+      },
     },
   },
   OrganizerSessionsResponse: {
@@ -534,12 +662,96 @@ const schemaDefinitions = {
       },
     },
   },
+  ReservationCancellationResult: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['reservation', 'tickets'],
+    properties: {
+      reservation: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'status'],
+        properties: {
+          id: uuidSchema,
+          status: { type: 'string', enum: ['CANCELLED'] },
+        },
+      },
+      tickets: {
+        type: 'array',
+        minItems: 1,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['id', 'status'],
+          properties: {
+            id: uuidSchema,
+            status: { type: 'string', enum: ['CANCELLED'] },
+          },
+        },
+      },
+    },
+  },
+  TicketCancellationResult: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['ticket', 'reservation'],
+    properties: {
+      ticket: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'status'],
+        properties: {
+          id: uuidSchema,
+          status: { type: 'string', enum: ['CANCELLED'] },
+        },
+      },
+      reservation: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['id', 'status'],
+        properties: {
+          id: uuidSchema,
+          status: { type: 'string', enum: ['PAID', 'CANCELLED'] },
+        },
+      },
+    },
+  },
   TicketSummary: {
     type: 'object',
     additionalProperties: false,
-    required: ['id', 'status', 'manualCode', 'issuedAt', 'session', 'seat'],
-    properties: ticketSummaryProperties,
-  },
+    required: [
+      'id',
+      'status',
+      'manualCode',
+      'issuedAt',
+      'session',
+      'seat',
+      'canCancel',
+      'reservation',
+    ],
+    properties: ownedTicketProperties,
+    oneOf: [
+      {
+        type: 'object',
+        required: ['status', 'manualCode'],
+        properties: {
+          status: { type: 'string', enum: ['VALID', 'USED'] },
+          manualCode: {
+            type: 'string',
+            pattern: '^[2-9A-HJKMNP-Z]{4}(?:-[2-9A-HJKMNP-Z]{4}){3}$',
+          },
+        },
+      },
+      {
+        type: 'object',
+        required: ['status', 'manualCode'],
+        properties: {
+          status: { type: 'string', enum: ['CANCELLED'] },
+          manualCode: { type: 'string', nullable: true, enum: [null] },
+        },
+      },
+    ],
+  } as SchemaObject,
   TicketListResponse: {
     type: 'object',
     additionalProperties: false,
@@ -561,11 +773,13 @@ const schemaDefinitions = {
       'issuedAt',
       'session',
       'seat',
+      'canCancel',
+      'reservation',
       'shareLink',
       'qrToken',
     ],
     properties: {
-      ...ticketSummaryProperties,
+      ...ownedTicketProperties,
       shareLink: {
         type: 'object',
         nullable: true,
@@ -577,10 +791,35 @@ const schemaDefinitions = {
       },
       qrToken: {
         type: 'string',
-        description: 'Credencial assinada codificada no QR do ingresso.',
+        nullable: true,
+        description:
+          'Credencial assinada codificada no QR. É null quando o ingresso foi cancelado.',
       },
     },
-  },
+    oneOf: [
+      {
+        type: 'object',
+        required: ['status', 'manualCode', 'qrToken'],
+        properties: {
+          status: { type: 'string', enum: ['VALID', 'USED'] },
+          manualCode: {
+            type: 'string',
+            pattern: '^[2-9A-HJKMNP-Z]{4}(?:-[2-9A-HJKMNP-Z]{4}){3}$',
+          },
+          qrToken: { type: 'string' },
+        },
+      },
+      {
+        type: 'object',
+        required: ['status', 'manualCode', 'qrToken'],
+        properties: {
+          status: { type: 'string', enum: ['CANCELLED'] },
+          manualCode: { type: 'string', nullable: true, enum: [null] },
+          qrToken: { type: 'string', nullable: true, enum: [null] },
+        },
+      },
+    ],
+  } as SchemaObject,
   SharedTicket: {
     type: 'object',
     additionalProperties: false,
@@ -597,10 +836,35 @@ const schemaDefinitions = {
       ...ticketSummaryProperties,
       qrToken: {
         type: 'string',
-        description: 'Credencial assinada codificada no QR do ingresso.',
+        nullable: true,
+        description:
+          'Credencial assinada codificada no QR. É null quando o ingresso foi cancelado.',
       },
     },
-  },
+    oneOf: [
+      {
+        type: 'object',
+        required: ['status', 'manualCode', 'qrToken'],
+        properties: {
+          status: { type: 'string', enum: ['VALID', 'USED'] },
+          manualCode: {
+            type: 'string',
+            pattern: '^[2-9A-HJKMNP-Z]{4}(?:-[2-9A-HJKMNP-Z]{4}){3}$',
+          },
+          qrToken: { type: 'string' },
+        },
+      },
+      {
+        type: 'object',
+        required: ['status', 'manualCode', 'qrToken'],
+        properties: {
+          status: { type: 'string', enum: ['CANCELLED'] },
+          manualCode: { type: 'string', nullable: true, enum: [null] },
+          qrToken: { type: 'string', nullable: true, enum: [null] },
+        },
+      },
+    ],
+  } as SchemaObject,
   ShareLink: {
     type: 'object',
     additionalProperties: false,
@@ -735,6 +999,25 @@ export const openApiSchemas = schemaDefinitions
 
 export function schemaRef(name: OpenApiSchemaName) {
   return { $ref: `#/components/schemas/${name}` } as const
+}
+
+/**
+ * Uma stream SSE não tem corpo JSON: ela é um texto infinito de eventos.
+ * Documentamos o media type real em vez de inventar um envelope de resposta.
+ */
+export function eventStreamResponse(description: string) {
+  return {
+    description,
+    content: {
+      'text/event-stream': {
+        schema: {
+          type: 'string',
+          description:
+            'Fluxo de eventos SSE. Cada bloco usa `event: <nome>` e `data: {"sessionId":"<uuid>"}`. Eventos: `sync` na abertura, `seats-changed` a cada mudança de disponibilidade e `session-changed` quando os dados estruturais da sessão são editados. Comentários `: keep-alive` mantêm a conexão viva.',
+        },
+      },
+    },
+  } as const
 }
 
 export function documentedResponse(

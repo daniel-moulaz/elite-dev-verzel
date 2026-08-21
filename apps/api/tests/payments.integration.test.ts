@@ -426,7 +426,19 @@ describe('payment state transitions', () => {
       reservation: { status: ReservationStatus.CANCELLED },
       tickets: [],
     })
-    expect(await prisma.reservationSeat.count({ where: { reservationId: hold.id } })).toBe(0)
+    const releasedAllocations = await prisma.reservationSeat.findMany({
+      where: { reservationId: hold.id },
+      select: { releasedAt: true },
+    })
+    expect(releasedAllocations).toHaveLength(2)
+    expect(
+      releasedAllocations.every(({ releasedAt }) => releasedAt !== null),
+    ).toBe(true)
+    expect(
+      await prisma.reservationSeat.count({
+        where: { reservationId: hold.id, releasedAt: null },
+      }),
+    ).toBe(0)
     expect(await prisma.ticket.count({ where: { sessionId: session.id } })).toBe(0)
 
     const replacement = await app.inject({
@@ -461,7 +473,17 @@ describe('payment state transitions', () => {
         select: { status: true },
       }),
     ).toEqual({ status: ReservationStatus.EXPIRED })
-    expect(await prisma.reservationSeat.count({ where: { reservationId: hold.id } })).toBe(0)
+    expect(
+      await prisma.reservationSeat.findMany({
+        where: { reservationId: hold.id },
+        select: { releasedAt: true },
+      }),
+    ).toEqual([{ releasedAt: expect.any(Date) }])
+    expect(
+      await prisma.reservationSeat.count({
+        where: { reservationId: hold.id, releasedAt: null },
+      }),
+    ).toBe(0)
     expect(await prisma.payment.count({ where: { reservationId: hold.id } })).toBe(0)
   })
 
@@ -581,6 +603,7 @@ describe('concurrent payment arbitration', () => {
       finalPaymentStatus: PaymentStatus.APPROVED,
       expectedTickets: 2,
       expectedReservationSeats: 2,
+      expectedActiveReservationSeats: 2,
     },
     {
       description: 'DECLINED wins over APPROVED',
@@ -589,7 +612,8 @@ describe('concurrent payment arbitration', () => {
       finalReservationStatus: ReservationStatus.CANCELLED,
       finalPaymentStatus: PaymentStatus.DECLINED,
       expectedTickets: 0,
-      expectedReservationSeats: 0,
+      expectedReservationSeats: 2,
+      expectedActiveReservationSeats: 0,
     },
   ])(
     '$description when both outcomes contend for the same reservation',
@@ -600,6 +624,7 @@ describe('concurrent payment arbitration', () => {
       finalPaymentStatus,
       expectedTickets,
       expectedReservationSeats,
+      expectedActiveReservationSeats,
     }) => {
       const session = await createTestSession()
       const hold = await createHold(session, [0, 1])
@@ -664,6 +689,11 @@ describe('concurrent payment arbitration', () => {
             where: { reservationId: hold.id },
           }),
         ).toBe(expectedReservationSeats)
+        expect(
+          await prisma.reservationSeat.count({
+            where: { reservationId: hold.id, releasedAt: null },
+          }),
+        ).toBe(expectedActiveReservationSeats)
       } finally {
         if (blockerTransactionOpen) {
           await blocker.query('ROLLBACK')

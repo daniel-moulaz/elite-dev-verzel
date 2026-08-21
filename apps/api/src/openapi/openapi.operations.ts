@@ -26,7 +26,7 @@ import {
 } from '../modules/sessions/sessions.schemas.js'
 import { sharedTicketParamsSchema } from '../modules/shared-tickets/shared-tickets.schemas.js'
 import { ticketParamsSchema } from '../modules/tickets/tickets.schemas.js'
-import { documentedResponse } from './openapi.schemas.js'
+import { documentedResponse, eventStreamResponse } from './openapi.schemas.js'
 
 const bearerSecurity = [{ bearerAuth: [] }] as const
 
@@ -184,9 +184,9 @@ export const apiDocumentation = {
     updateSession: documentRoute({
       tags: ['Organizer'],
       operationId: 'updateOrganizerSession',
-      summary: 'Atualiza uma sessão em rascunho',
+      summary: 'Atualiza uma sessão editável',
       description:
-        'Requer papel ORGANIZER. Informe ao menos um campo; rows e seatsPerRow devem ser enviados juntos. Sessões publicadas são estruturalmente bloqueadas.',
+        'Requer papel ORGANIZER e ownership. Informe ao menos um campo; rows e seatsPerRow devem ser enviados juntos. Uma sessão PUBLISHED continua editável enquanto a alteração for segura — sem hold ativo, sem compra paga, sem nenhum ingresso emitido e antes do início; ela permanece PUBLISHED e preserva publishedAt. A política é revalidada sob lock dentro da transação, então o campo editability do GET é um indicativo, não a autorização final.',
       security: bearerSecurity,
       params: zodInput(sessionParamsSchema),
       body: zodInput(updateSessionBodySchema),
@@ -197,8 +197,28 @@ export const apiDocumentation = {
         404: errorResponse(
           'Sessão inexistente, não pertencente ao usuário ou filme não encontrado.',
         ),
-        409: errorResponse('Sessão não pode mais ser editada.'),
+        409: errorResponse(
+          'Sessão não pode mais ser editada (SESSION_NOT_EDITABLE) ou o mapa não pode ser reconstruído por já possuir histórico de assentos (SESSION_LAYOUT_NOT_EDITABLE).',
+        ),
         ...tmdbErrors,
+      },
+    }),
+    duplicateSession: documentRoute({
+      tags: ['Organizer'],
+      operationId: 'duplicateOrganizerSession',
+      summary: 'Duplica uma sessão como novo rascunho',
+      description:
+        'Requer papel ORGANIZER e ownership. A origem pode ser DRAFT ou PUBLISHED. Copia apenas a estrutura — snapshot do filme, local, sala, endereço, preço e formato do layout — gerando assentos com identificadores novos. Nada transacional é copiado: reservas, alocações, pagamentos, ingressos e links compartilhados permanecem exclusivos da origem. A cópia nasce DRAFT com publishedAt nulo e não consulta a TMDb novamente.',
+      security: bearerSecurity,
+      params: zodInput(sessionParamsSchema),
+      response: {
+        201: documentedResponse(
+          'OrganizerSession',
+          'Cópia criada como rascunho.',
+        ),
+        400: errorResponse('Identificador de sessão inválido.'),
+        ...authenticationErrors,
+        404: errorResponse('Sessão inexistente ou não pertencente ao usuário.'),
       },
     }),
     publishSession: documentRoute({
@@ -261,6 +281,21 @@ export const apiDocumentation = {
         404: errorResponse('Sessão não encontrada.'),
       },
     }),
+    events: documentRoute({
+      tags: ['Sessions'],
+      operationId: 'streamPublicSessionEvents',
+      summary: 'Assina as invalidações de disponibilidade da sessão',
+      description:
+        'Stream Server-Sent Events de uma sessão publicada. Os eventos são apenas sinais de invalidação e nunca transportam o estado dos assentos, ingressos, credenciais ou dados pessoais: ao receber `sync` ou `seats-changed`, o cliente deve reconsultar GET /sessions/{id}/seats, e ao receber `session-changed` deve reconsultar GET /sessions/{id}. Esses snapshots permanecem a autoridade. O polling do cliente continua como rede de segurança caso um evento se perca.',
+      params: zodInput(publicSessionParamsSchema),
+      response: {
+        200: eventStreamResponse(
+          'Stream aberto. Emite `sync` na conexão e `seats-changed` a cada mudança real de disponibilidade.',
+        ),
+        400: errorResponse('Identificador de sessão inválido.'),
+        404: errorResponse('Sessão não encontrada.'),
+      },
+    }),
   },
 
   reservations: {
@@ -269,7 +304,7 @@ export const apiDocumentation = {
       operationId: 'createReservation',
       summary: 'Reserva temporariamente de um a seis assentos',
       description:
-        'Requer papel CUSTOMER. seatIds não pode conter repetições. A reserva cria um hold de 10 minutos; a garantia contra dupla venda permanece no backend e no banco.',
+        'Requer papel CUSTOMER. seatIds não pode conter repetições. A reserva cria um hold de 10 minutos; um índice único parcial no PostgreSQL permite somente uma alocação ativa por assento.',
       security: bearerSecurity,
       body: zodInput(createReservationBodySchema),
       response: {
@@ -292,6 +327,27 @@ export const apiDocumentation = {
         400: errorResponse('Identificador de reserva inválido.'),
         ...authenticationErrors,
         404: errorResponse('Reserva inexistente ou não pertencente ao usuário.'),
+      },
+    }),
+    cancel: documentRoute({
+      tags: ['Reservations'],
+      operationId: 'cancelReservation',
+      summary: 'Cancela uma compra paga inteira',
+      description:
+        'Requer papel CUSTOMER e ownership. Cancela atomicamente todos os ingressos ainda VALID da compra futura e devolve seus assentos ao estoque; ingressos já cancelados individualmente não são afetados novamente. O pagamento APPROVED permanece como histórico; não existe estorno financeiro real.',
+      security: bearerSecurity,
+      params: zodInput(reservationParamsSchema),
+      response: {
+        200: documentedResponse(
+          'ReservationCancellationResult',
+          'Compra e todos os seus ingressos cancelados.',
+        ),
+        400: errorResponse('Identificador de reserva inválido.'),
+        ...authenticationErrors,
+        404: errorResponse('Reserva inexistente ou não pertencente ao usuário.'),
+        409: errorResponse(
+          'Compra já cancelada, não paga, iniciada ou com ingresso utilizado.',
+        ),
       },
     }),
   },
@@ -346,6 +402,27 @@ export const apiDocumentation = {
         404: errorResponse('Ingresso inexistente ou não pertencente ao usuário.'),
       },
     }),
+    cancel: documentRoute({
+      tags: ['Tickets'],
+      operationId: 'cancelCustomerTicket',
+      summary: 'Cancela um ingresso individual',
+      description:
+        'Requer papel CUSTOMER e ownership. Cancela atomicamente somente este ingresso e libera o assento correspondente; os demais ingressos da mesma compra não são afetados. Quando este é o último ingresso ainda VALID da compra, a reserva também passa a CANCELLED. O pagamento APPROVED permanece como histórico; não existe estorno financeiro real.',
+      security: bearerSecurity,
+      params: zodInput(ticketParamsSchema),
+      response: {
+        200: documentedResponse(
+          'TicketCancellationResult',
+          'Ingresso e, quando aplicável, a compra cancelados.',
+        ),
+        400: errorResponse('Identificador de ingresso inválido.'),
+        ...authenticationErrors,
+        404: errorResponse('Ingresso inexistente ou não pertencente ao usuário.'),
+        409: errorResponse(
+          'Ingresso não está VALID ou a sessão já foi iniciada.',
+        ),
+      },
+    }),
   },
 
   sharing: {
@@ -354,7 +431,7 @@ export const apiDocumentation = {
       operationId: 'createTicketShareLink',
       summary: 'Cria ou rotaciona o link público do ingresso',
       description:
-        'Requer papel CUSTOMER. Um novo link invalida o anterior e não expõe dados pessoais do comprador.',
+        'Requer papel CUSTOMER. Um novo link invalida o anterior e não expõe dados pessoais do comprador. Ingressos cancelados não geram novos links.',
       security: bearerSecurity,
       params: zodInput(ticketParamsSchema),
       response: {
@@ -362,7 +439,9 @@ export const apiDocumentation = {
         400: errorResponse('Identificador de ingresso inválido.'),
         ...authenticationErrors,
         404: errorResponse('Ingresso inexistente ou não pertencente ao usuário.'),
-        409: errorResponse('Ingresso fora da janela de compartilhamento.'),
+        409: errorResponse(
+          'Ingresso cancelado ou fora da janela de compartilhamento.',
+        ),
       },
     }),
     revoke: documentRoute({
@@ -385,7 +464,7 @@ export const apiDocumentation = {
       operationId: 'getSharedTicket',
       summary: 'Obtém um ingresso pelo link público',
       description:
-        'O token da URL é uma credencial sensível. A resposta não contém nome, e-mail ou identificação do comprador e não deve ser armazenada em cache.',
+        'O token da URL é uma credencial sensível. A resposta não contém nome, e-mail ou identificação do comprador e não deve ser armazenada em cache. Um link já existente continua mostrando o estado CANCELLED, sem QR ou código manual utilizável.',
       params: zodInput(sharedTicketParamsSchema),
       response: {
         200: documentedResponse('SharedTicket', 'Ingresso compartilhado.'),
@@ -415,7 +494,7 @@ export const apiDocumentation = {
       operationId: 'consumeGateTicket',
       summary: 'Valida e consome uma credencial de ingresso',
       description:
-        'Requer papel GATE. Os resultados INVALID, WRONG_EVENT, ALREADY_USED e VALID usam HTTP 200. Somente VALID consome o ingresso, de forma atômica; WRONG_EVENT não o consome.',
+        'Requer papel GATE. Os resultados INVALID, WRONG_EVENT, ALREADY_USED e VALID usam HTTP 200. Somente VALID consome o ingresso, de forma atômica; WRONG_EVENT não o consome e, para uma sessão selecionada válida, uma credencial cancelada resulta em INVALID.',
       security: bearerSecurity,
       body: zodInput(consumeTicketBodySchema),
       response: {

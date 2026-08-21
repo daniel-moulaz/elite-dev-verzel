@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   ApiError,
+  cancelTicket,
   createTicketShareLink,
   getMyTicket,
   revokeTicketShareLink,
@@ -44,7 +45,9 @@ export function TicketDetail({
   const [shareFeedback, setShareFeedback] = useState<ShareFeedback | null>(null)
   const [shareAction, setShareAction] = useState<ShareAction>('idle')
   const [reloadKey, setReloadKey] = useState(0)
+  const [isCancellingTicket, setIsCancellingTicket] = useState(false)
   const shareActionLockRef = useRef(false)
+  const cancelActionLockRef = useRef(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -92,7 +95,11 @@ export function TicketDetail({
   }
 
   async function generateShareLink() {
-    if (shareActionLockRef.current) {
+    if (
+      ticket?.status === 'CANCELLED' ||
+      shareActionLockRef.current ||
+      cancelActionLockRef.current
+    ) {
       return
     }
 
@@ -194,7 +201,7 @@ export function TicketDetail({
   }
 
   async function revokeShareLink() {
-    if (shareActionLockRef.current) {
+    if (shareActionLockRef.current || cancelActionLockRef.current) {
       return
     }
 
@@ -228,6 +235,53 @@ export function TicketDetail({
       })
     } finally {
       finishShareAction()
+    }
+  }
+
+  async function cancelThisTicket() {
+    if (
+      !ticket ||
+      ticket.status !== 'VALID' ||
+      !ticket.canCancel ||
+      cancelActionLockRef.current ||
+      shareActionLockRef.current
+    ) {
+      return
+    }
+
+    const confirmed = window.confirm(
+      'Este ingresso será cancelado e o assento voltará a ficar disponível. '
+      + 'Os demais ingressos desta compra não são afetados. '
+      + 'Como o pagamento é simulado, não haverá estorno financeiro real. Deseja continuar?',
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    cancelActionLockRef.current = true
+    setIsCancellingTicket(true)
+
+    try {
+      await cancelTicket(accessToken, ticketId)
+      setTicket((current) =>
+        current
+          ? { ...current, status: 'CANCELLED', manualCode: null, qrToken: null }
+          : current,
+      )
+      notify('Ingresso cancelado. O assento voltou a ficar disponível.', 'success')
+      setReloadKey((value) => value + 1)
+    } catch (error) {
+      notify(
+        error instanceof ApiError
+          ? error.message
+          : 'Não foi possível cancelar este ingresso.',
+        'error',
+      )
+      setReloadKey((value) => value + 1)
+    } finally {
+      cancelActionLockRef.current = false
+      setIsCancellingTicket(false)
     }
   }
 
@@ -308,6 +362,16 @@ export function TicketDetail({
           >
             Imprimir / salvar
           </button>
+          {ticket.status === 'VALID' && ticket.canCancel ? (
+            <button
+              type="button"
+              className="danger-text-button"
+              onClick={() => void cancelThisTicket()}
+              disabled={isCancellingTicket || shareAction !== 'idle'}
+            >
+              {isCancellingTicket ? 'Cancelando…' : 'Cancelar ingresso'}
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -326,12 +390,13 @@ export function TicketDetail({
           <p className="section-kicker">Compartilhamento seguro</p>
           <h2 id="share-heading">Compartilhar ingresso</h2>
           <p>
-            O link exibe este ingresso sem seu nome ou e-mail. Um novo link
-            invalida o anterior.
+            {ticket.status === 'CANCELLED'
+              ? 'Este ingresso está cancelado. Links já emitidos continuam informando o cancelamento, sem exibir uma credencial utilizável.'
+              : 'O link exibe este ingresso sem seu nome ou e-mail. Um novo link invalida o anterior.'}
           </p>
         </div>
 
-        {shareLink ? (
+        {shareLink && ticket.status !== 'CANCELLED' ? (
           <div className="share-link-result">
             <label htmlFor="share-url">Link compartilhável</label>
             <div>
@@ -339,7 +404,7 @@ export function TicketDetail({
               <button
                 type="button"
                 onClick={() => void copyShareLink()}
-                disabled={shareAction !== 'idle'}
+                disabled={shareAction !== 'idle' || isCancellingTicket}
               >
                 {shareAction === 'copying' ? 'Copiando…' : 'Copiar'}
               </button>
@@ -350,7 +415,7 @@ export function TicketDetail({
                   type="button"
                   className="secondary-button"
                   onClick={() => void shareTicket()}
-                  disabled={shareAction !== 'idle'}
+                  disabled={shareAction !== 'idle' || isCancellingTicket}
                 >
                   {shareAction === 'sharing'
                     ? 'Compartilhando…'
@@ -379,8 +444,17 @@ export function TicketDetail({
           </div>
         ) : ticket.shareLink ? (
           <p className="active-share-note">
-            Há um link ativo até {shareExpirationLabel(ticket.shareLink.expiresAt)}.
-            Gere um novo para obter outra URL; o link anterior será invalidado.
+            {ticket.status === 'CANCELLED' ? (
+              <>
+                Há um link ativo até {shareExpirationLabel(ticket.shareLink.expiresAt)}.
+                Ele mostra este ingresso como cancelado e pode ser revogado abaixo.
+              </>
+            ) : (
+              <>
+                Há um link ativo até {shareExpirationLabel(ticket.shareLink.expiresAt)}.
+                Gere um novo para obter outra URL; o link anterior será invalidado.
+              </>
+            )}
           </p>
         ) : null}
 
@@ -394,23 +468,25 @@ export function TicketDetail({
         ) : null}
 
         <div className="share-actions">
-          <button
-            type="button"
-            onClick={() => void generateShareLink()}
-            disabled={shareAction !== 'idle'}
-          >
-            {shareAction === 'creating'
-              ? 'Gerando…'
-              : ticket.shareLink
-                ? 'Gerar novo link'
-                : 'Gerar link'}
-          </button>
+          {ticket.status !== 'CANCELLED' ? (
+            <button
+              type="button"
+              onClick={() => void generateShareLink()}
+              disabled={shareAction !== 'idle' || isCancellingTicket}
+            >
+              {shareAction === 'creating'
+                ? 'Gerando…'
+                : ticket.shareLink
+                  ? 'Gerar novo link'
+                  : 'Gerar link'}
+            </button>
+          ) : null}
           {ticket.shareLink ? (
             <button
               type="button"
               className="danger-text-button"
               onClick={() => void revokeShareLink()}
-              disabled={shareAction !== 'idle'}
+              disabled={shareAction !== 'idle' || isCancellingTicket}
             >
               {shareAction === 'revoking' ? 'Revogando…' : 'Revogar link'}
             </button>

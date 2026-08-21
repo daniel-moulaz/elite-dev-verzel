@@ -425,9 +425,17 @@ describe('reservation hold lifecycle', () => {
       status: ReservationStatus.EXPIRED,
       seats: [],
     })
+    const releasedAllocations = await prisma.reservationSeat.findMany({
+      where: { reservationId: hold.id },
+      select: { releasedAt: true },
+    })
+
+    expect(releasedAllocations).toEqual([
+      { releasedAt: expect.any(Date) },
+    ])
     expect(
       await prisma.reservationSeat.count({
-        where: { reservationId: hold.id },
+        where: { reservationId: hold.id, releasedAt: null },
       }),
     ).toBe(0)
   })
@@ -456,12 +464,22 @@ describe('reservation hold lifecycle', () => {
         select: { status: true },
       }),
     ).toEqual({ status: ReservationStatus.EXPIRED })
-    expect(
-      await prisma.reservationSeat.findMany({
-        where: { seatId },
-        select: { reservationId: true },
-      }),
-    ).toEqual([{ reservationId: replacement.json<ReservationResponse>().id }])
+    const replacementId = replacement.json<ReservationResponse>().id
+    const allocations = await prisma.reservationSeat.findMany({
+      where: { seatId },
+      select: { reservationId: true, releasedAt: true },
+    })
+
+    expect(allocations).toHaveLength(2)
+    expect(allocations).toEqual(
+      expect.arrayContaining([
+        {
+          reservationId: expiredHold.id,
+          releasedAt: expect.any(Date),
+        },
+        { reservationId: replacementId, releasedAt: null },
+      ]),
+    )
   })
 
   it('returns 409 for an active hold without creating an orphan reservation', async () => {
@@ -507,7 +525,7 @@ describe('reservation hold lifecycle', () => {
     ).toBe(0)
   })
 
-  it('keeps UNIQUE(seatId) as the database-level final defense', async () => {
+  it('keeps one active allocation per seat as the database-level final defense', async () => {
     const session = await createTestSession()
     const seatId = session.seats[0]!.id
     await createSuccessfulHold(session.id, [seatId])

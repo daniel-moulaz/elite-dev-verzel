@@ -10,8 +10,8 @@ import { useToast } from '../common/toast'
 
 export interface DigitalTicketData {
   status: TicketStatus
-  manualCode: string
-  qrToken: string
+  manualCode: string | null
+  qrToken: string | null
   seatLabel: string
   session: {
     startsAt: string
@@ -33,16 +33,26 @@ interface DigitalTicketProps {
 export function DigitalTicket({ ticket, shared = false }: DigitalTicketProps) {
   const { notify } = useToast()
   const posterUrl = tmdbPosterUrl(ticket.session.movie.posterPath)
-  const statusLabel = ticket.status === 'VALID' ? 'Válido' : 'Utilizado'
+  const statusLabels: Record<TicketStatus, string> = {
+    VALID: 'Válido',
+    USED: 'Utilizado',
+    CANCELLED: 'Cancelado',
+  }
+  const statusLabel = statusLabels[ticket.status]
+  const { manualCode, qrToken } = ticket
 
   async function copyManualCode() {
+    if (manualCode === null) {
+      return
+    }
+
     if (!navigator.clipboard) {
       notify('Selecione o código para copiá-lo manualmente.', 'info')
       return
     }
 
     try {
-      await navigator.clipboard.writeText(ticket.manualCode)
+      await navigator.clipboard.writeText(manualCode)
       notify('Código copiado.', 'success')
     } catch {
       notify('Não foi possível copiar o código automaticamente.', 'error')
@@ -104,39 +114,56 @@ export function DigitalTicket({ ticket, shared = false }: DigitalTicketProps) {
         <span />
       </div>
 
-      <div className="ticket-admission">
-        <span className="ticket-admission-label">Apresente na portaria</span>
-        <span className="ticket-admission-status">{statusLabel}</span>
-        <div
-          className="ticket-qr"
-          role="img"
-          aria-label={`QR Code do ingresso, assento ${ticket.seatLabel}`}
-        >
-          <QRCodeSVG
-            value={ticket.qrToken}
-            size={256}
-            level="M"
-            marginSize={4}
-            bgColor="#ffffff"
-            fgColor="#111111"
-            title={`Ingresso ${ticket.seatLabel}`}
-          />
+      {ticket.status === 'CANCELLED' ? (
+        <div className="ticket-admission ticket-admission-cancelled" role="status">
+          <span className="ticket-admission-label">Credencial cancelada</span>
+          <strong className="ticket-cancelled-title">Cancelado</strong>
+          <p>
+            Este ingresso não concede acesso. O assento voltou a ficar
+            disponível para outra compra.
+          </p>
         </div>
-        <span className="manual-code-label">Código manual</span>
-        <strong
-          className="manual-code"
-          aria-label={`Código manual ${ticket.manualCode}`}
-        >
-          {ticket.manualCode}
-        </strong>
-        <button
-          type="button"
-          className="ticket-copy-code"
-          onClick={() => void copyManualCode()}
-        >
-          Copiar código
-        </button>
-      </div>
+      ) : manualCode !== null && qrToken !== null ? (
+        <div className="ticket-admission">
+          <span className="ticket-admission-label">Apresente na portaria</span>
+          <span className="ticket-admission-status">{statusLabel}</span>
+          <div
+            className="ticket-qr"
+            role="img"
+            aria-label={`QR Code do ingresso, assento ${ticket.seatLabel}`}
+          >
+            <QRCodeSVG
+              value={qrToken}
+              size={256}
+              level="M"
+              marginSize={4}
+              bgColor="#ffffff"
+              fgColor="#111111"
+              title={`Ingresso ${ticket.seatLabel}`}
+            />
+          </div>
+          <span className="manual-code-label">Código manual</span>
+          <strong
+            className="manual-code"
+            aria-label={`Código manual ${manualCode}`}
+          >
+            {manualCode}
+          </strong>
+          <button
+            type="button"
+            className="ticket-copy-code"
+            onClick={() => void copyManualCode()}
+          >
+            Copiar código
+          </button>
+        </div>
+      ) : (
+        <div className="ticket-admission ticket-admission-cancelled" role="status">
+          <span className="ticket-admission-label">Credencial indisponível</span>
+          <strong className="ticket-cancelled-title">Indisponível</strong>
+          <p>Não foi possível carregar os dados de acesso deste ingresso.</p>
+        </div>
+      )}
     </article>
   )
 }

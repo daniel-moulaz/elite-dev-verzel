@@ -22,15 +22,19 @@ const EXPECTED_PATHS = [
   '/catalog/movies/{tmdbId}',
   '/organizer/sessions',
   '/organizer/sessions/{id}',
+  '/organizer/sessions/{id}/duplicate',
   '/organizer/sessions/{id}/publish',
   '/sessions',
   '/sessions/{id}',
   '/sessions/{id}/seats',
+  '/sessions/{id}/events',
   '/reservations',
   '/reservations/{id}',
+  '/reservations/{id}/cancel',
   '/reservations/{id}/payment',
   '/me/tickets',
   '/me/tickets/{id}',
+  '/me/tickets/{id}/cancel',
   '/me/tickets/{id}/share-link',
   '/shared/{token}',
   '/gate/sessions',
@@ -224,6 +228,20 @@ function getSingleAllowedString(schema: JsonObject) {
   throw new Error('A variante não possui um único valor discriminador.')
 }
 
+function findVariantByStatus(
+  document: JsonObject,
+  inputSchema: unknown,
+  status: string,
+) {
+  const schema = resolveLocalReference(document, inputSchema)
+  const variants = asObjectArray(schema.oneOf, 'schema.oneOf')
+
+  return variants.find((variant) => {
+    const statusSchema = findPropertySchema(document, variant, 'status')
+    return Array.isArray(statusSchema?.enum) && statusSchema.enum.includes(status)
+  })
+}
+
 function expectBearerSecurity(operation: JsonObject) {
   expect(operation.security).toEqual(
     expect.arrayContaining([{ bearerAuth: [] }]),
@@ -267,9 +285,9 @@ describe('OpenAPI documentation', () => {
         'API da plataforma de sessões e ingressos de cinema SEPTEM.',
       version: '0.1.0',
     })
-    expect(paths).toHaveLength(20)
+    expect(paths).toHaveLength(24)
     expect(paths).toEqual(expect.arrayContaining([...EXPECTED_PATHS]))
-    expect(listOperations(document)).toHaveLength(23)
+    expect(listOperations(document)).toHaveLength(27)
   })
 
   it('documents tags, bearer authentication and role requirements', async () => {
@@ -313,10 +331,13 @@ describe('OpenAPI documentation', () => {
       ['/auth/login', 'post', 'Auth'],
       ['/catalog/movies', 'get', 'Catalog'],
       ['/sessions', 'get', 'Sessions'],
+      ['/sessions/{id}/events', 'get', 'Sessions'],
       ['/organizer/sessions', 'get', 'Organizer'],
       ['/reservations', 'post', 'Reservations'],
+      ['/reservations/{id}/cancel', 'post', 'Reservations'],
       ['/reservations/{id}/payment', 'post', 'Payments'],
       ['/me/tickets', 'get', 'Tickets'],
+      ['/me/tickets/{id}/cancel', 'post', 'Tickets'],
       ['/me/tickets/{id}/share-link', 'post', 'Sharing'],
       ['/gate/sessions', 'get', 'Gate'],
     ] as const
@@ -442,6 +463,340 @@ describe('OpenAPI documentation', () => {
       'delete share responses',
     )
     expect(shareResponses).toHaveProperty('204')
+
+    const organizerSchemas = asObject(
+      asObject(document.components, 'components').schemas,
+      'components.schemas',
+    )
+    const organizerSession = resolveLocalReference(
+      document,
+      organizerSchemas.OrganizerSession,
+    )
+    const editability = findPropertySchema(
+      document,
+      organizerSession,
+      'editability',
+    )
+    const sessionMetrics = findPropertySchema(
+      document,
+      organizerSession,
+      'metrics',
+    )
+
+    expect(
+      findPropertySchema(document, editability, 'reason')?.enum,
+    ).toEqual([
+      'DRAFT',
+      'PUBLISHED_SAFE',
+      'SESSION_STARTED',
+      'ACTIVE_HOLD',
+      'COMMERCIAL_HISTORY',
+    ])
+    expect(
+      findPropertySchema(document, editability, 'allowed'),
+    ).toMatchObject({ type: 'boolean' })
+    expect(
+      findPropertySchema(document, editability, 'layoutEditable'),
+    ).toMatchObject({ type: 'boolean' })
+    expect(asObject(sessionMetrics, 'metrics').required).toEqual([
+      'capacity',
+      'availableSeats',
+      'heldSeats',
+      'soldSeats',
+      'occupancyPercentage',
+      'simulatedRevenueCents',
+    ])
+    expect(
+      findPropertySchema(document, sessionMetrics, 'simulatedRevenueCents'),
+    ).toMatchObject({ type: 'integer', minimum: 0 })
+    expect(
+      findPropertySchema(document, sessionMetrics, 'occupancyPercentage'),
+    ).toMatchObject({ type: 'number', minimum: 0, maximum: 100 })
+
+    const duplicateSession = getOperation(
+      document,
+      '/organizer/sessions/{id}/duplicate',
+      'post',
+    )
+    expect(duplicateSession.operationId).toBe('duplicateOrganizerSession')
+    expectBearerSecurity(duplicateSession)
+    expect(
+      asObject(duplicateSession.responses, 'duplicate responses'),
+    ).toEqual(
+      expect.objectContaining({
+        201: expect.any(Object),
+        400: expect.any(Object),
+        401: expect.any(Object),
+        403: expect.any(Object),
+        404: expect.any(Object),
+      }),
+    )
+
+    const sessionEvents = getOperation(
+      document,
+      '/sessions/{id}/events',
+      'get',
+    )
+    const sessionEventsResponses = asObject(
+      sessionEvents.responses,
+      'session events responses',
+    )
+    const streamResponse = asObject(
+      sessionEventsResponses['200'],
+      'session events 200',
+    )
+    const streamContent = asObject(
+      streamResponse.content,
+      'session events 200 content',
+    )
+
+    expect(sessionEvents.operationId).toBe('streamPublicSessionEvents')
+    // Endpoint público: o snapshot equivalente também não exige autenticação.
+    expect(sessionEvents.security ?? []).toEqual([])
+    // Uma stream infinita não pode ser documentada como um corpo JSON.
+    expect(Object.keys(streamContent)).toEqual(['text/event-stream'])
+    expect(streamContent).not.toHaveProperty('application/json')
+    expect(
+      asObject(streamContent['text/event-stream'], 'stream media type').schema,
+    ).toMatchObject({ type: 'string' })
+    expect(sessionEventsResponses).toEqual(
+      expect.objectContaining({
+        200: expect.any(Object),
+        400: expect.any(Object),
+        404: expect.any(Object),
+      }),
+    )
+
+    const cancelReservation = getOperation(
+      document,
+      '/reservations/{id}/cancel',
+      'post',
+    )
+    expect(cancelReservation.operationId).toBe('cancelReservation')
+    expectBearerSecurity(cancelReservation)
+    expect(asObject(cancelReservation.responses, 'cancel responses')).toEqual(
+      expect.objectContaining({
+        200: expect.any(Object),
+        400: expect.any(Object),
+        401: expect.any(Object),
+        403: expect.any(Object),
+        404: expect.any(Object),
+        409: expect.any(Object),
+      }),
+    )
+    const cancellationResult = resolveLocalReference(
+      document,
+      getResponseSchema(cancelReservation, '200'),
+    )
+    const cancelledReservation = findPropertySchema(
+      document,
+      cancellationResult,
+      'reservation',
+    )
+    const cancelledTickets = findPropertySchema(
+      document,
+      cancellationResult,
+      'tickets',
+    )
+    const cancelledReservationStatus = findPropertySchema(
+      document,
+      cancelledReservation,
+      'status',
+    )
+    const cancelledTicketItems = resolveLocalReference(
+      document,
+      asObject(cancelledTickets, 'cancelled tickets').items,
+    )
+    const cancelledTicketStatus = findPropertySchema(
+      document,
+      cancelledTicketItems,
+      'status',
+    )
+
+    expect(cancellationResult.required).toEqual(['reservation', 'tickets'])
+    expect(cancelledReservationStatus?.enum).toEqual(['CANCELLED'])
+    expect(cancelledTickets).toMatchObject({ type: 'array', minItems: 1 })
+    expect(cancelledTicketStatus?.enum).toEqual(['CANCELLED'])
+
+    const cancelTicket = getOperation(
+      document,
+      '/me/tickets/{id}/cancel',
+      'post',
+    )
+    expect(cancelTicket.operationId).toBe('cancelCustomerTicket')
+    expectBearerSecurity(cancelTicket)
+    expect(asObject(cancelTicket.responses, 'cancel ticket responses')).toEqual(
+      expect.objectContaining({
+        200: expect.any(Object),
+        400: expect.any(Object),
+        401: expect.any(Object),
+        403: expect.any(Object),
+        404: expect.any(Object),
+        409: expect.any(Object),
+      }),
+    )
+    const ticketCancellationResult = resolveLocalReference(
+      document,
+      getResponseSchema(cancelTicket, '200'),
+    )
+    const cancelledTicketResult = findPropertySchema(
+      document,
+      ticketCancellationResult,
+      'ticket',
+    )
+    const ticketResultReservation = findPropertySchema(
+      document,
+      ticketCancellationResult,
+      'reservation',
+    )
+    const cancelledTicketResultStatus = findPropertySchema(
+      document,
+      cancelledTicketResult,
+      'status',
+    )
+    const ticketResultReservationStatus = findPropertySchema(
+      document,
+      ticketResultReservation,
+      'status',
+    )
+
+    expect(ticketCancellationResult.required).toEqual(['ticket', 'reservation'])
+    expect(cancelledTicketResultStatus?.enum).toEqual(['CANCELLED'])
+    expect(ticketResultReservationStatus?.enum).toEqual(['PAID', 'CANCELLED'])
+
+    const components = asObject(document.components, 'components')
+    const schemas = asObject(components.schemas, 'components.schemas')
+    const ticketSummary = resolveLocalReference(
+      document,
+      schemas.TicketSummary,
+    )
+    const sharedTicket = resolveLocalReference(
+      document,
+      schemas.SharedTicket,
+    )
+    const ticketDetail = resolveLocalReference(
+      document,
+      schemas.TicketDetail,
+    )
+    const errorResponse = resolveLocalReference(
+      document,
+      schemas.ErrorResponse,
+    )
+    const ticketStatus = findPropertySchema(document, ticketSummary, 'status')
+    const manualCode = findPropertySchema(
+      document,
+      ticketSummary,
+      'manualCode',
+    )
+    const privateReservation = findPropertySchema(
+      document,
+      ticketSummary,
+      'reservation',
+    )
+    const ticketCanCancel = findPropertySchema(
+      document,
+      ticketSummary,
+      'canCancel',
+    )
+    const detailCanCancel = findPropertySchema(
+      document,
+      ticketDetail,
+      'canCancel',
+    )
+    const sharedCanCancel = findPropertySchema(
+      document,
+      sharedTicket,
+      'canCancel',
+    )
+    const sharedReservation = findPropertySchema(
+      document,
+      sharedTicket,
+      'reservation',
+    )
+    const sharedManualCode = findPropertySchema(
+      document,
+      sharedTicket,
+      'manualCode',
+    )
+    const sharedQrToken = findPropertySchema(
+      document,
+      sharedTicket,
+      'qrToken',
+    )
+    const privateQrToken = findPropertySchema(
+      document,
+      ticketDetail,
+      'qrToken',
+    )
+    const errorCode = findPropertySchema(
+      document,
+      errorResponse,
+      'error',
+    )
+    const cancelledSummaryVariant = findVariantByStatus(
+      document,
+      ticketSummary,
+      'CANCELLED',
+    )
+    const cancelledDetailVariant = findVariantByStatus(
+      document,
+      ticketDetail,
+      'CANCELLED',
+    )
+    const cancelledSharedVariant = findVariantByStatus(
+      document,
+      sharedTicket,
+      'CANCELLED',
+    )
+    const cancelledReservationVariant = findVariantByStatus(
+      document,
+      privateReservation,
+      'CANCELLED',
+    )
+
+    expect(ticketStatus?.enum).toEqual(['VALID', 'USED', 'CANCELLED'])
+    expect(manualCode).toMatchObject({ type: 'string', nullable: true })
+    expect(privateReservation).toBeDefined()
+    expect(sharedReservation).toBeUndefined()
+    expect(ticketCanCancel).toMatchObject({ type: 'boolean' })
+    expect(detailCanCancel).toMatchObject({ type: 'boolean' })
+    expect(sharedCanCancel).toBeUndefined()
+    expect(sharedManualCode).toMatchObject({ type: 'string', nullable: true })
+    expect(sharedQrToken).toMatchObject({ type: 'string', nullable: true })
+    expect(privateQrToken).toMatchObject({ type: 'string', nullable: true })
+    expect(
+      findPropertySchema(
+        document,
+        cancelledSummaryVariant,
+        'manualCode',
+      )?.enum,
+    ).toEqual([null])
+    expect(
+      findPropertySchema(document, cancelledDetailVariant, 'qrToken')?.enum,
+    ).toEqual([null])
+    expect(
+      findPropertySchema(document, cancelledSharedVariant, 'qrToken')?.enum,
+    ).toEqual([null])
+    expect(
+      findPropertySchema(
+        document,
+        cancelledReservationVariant,
+        'canCancel',
+      )?.enum,
+    ).toEqual([false])
+    expect(errorCode?.enum).toEqual(
+      expect.arrayContaining([
+        'RESERVATION_ALREADY_CANCELLED',
+        'RESERVATION_NOT_CANCELLABLE',
+        'RESERVATION_SESSION_STARTED',
+        'RESERVATION_HAS_USED_TICKET',
+        'TICKET_NOT_SHAREABLE',
+        'TICKET_NOT_CANCELLABLE',
+        'TICKET_SESSION_STARTED',
+        'SESSION_NOT_EDITABLE',
+        'SESSION_LAYOUT_NOT_EDITABLE',
+      ]),
+    )
 
     const serializedDocument = JSON.stringify(document)
     expect(serializedDocument).not.toMatch(

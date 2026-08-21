@@ -7,6 +7,7 @@ import {
   getCustomerTicket,
   listCustomerTickets,
 } from './tickets.service.js'
+import { cancelCustomerTicket } from './ticket-cancellation.service.js'
 
 export interface TicketRoutesOptions {
   signingSecret: string
@@ -62,6 +63,30 @@ export const ticketRoutes: FastifyPluginAsync<TicketRoutesOptions> = async (
         params.data.id,
         customerIdFromRequest(request),
         options.signingSecret,
+      )
+    },
+  )
+
+  app.post(
+    '/:id/cancel',
+    {
+      config: { swaggerTransform: apiDocumentation.tickets.cancel },
+      preHandler: customerOnly,
+    },
+    async (request) => {
+      const params = ticketParamsSchema.safeParse(request.params)
+
+      if (!params.success) {
+        throw new HttpError(
+          400,
+          'VALIDATION_ERROR',
+          'Informe um identificador de ingresso válido.',
+        )
+      }
+
+      return cancelCustomerTicket(
+        params.data.id,
+        customerIdFromRequest(request),
       )
     },
   )

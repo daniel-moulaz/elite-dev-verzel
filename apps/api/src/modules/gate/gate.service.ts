@@ -170,6 +170,10 @@ export async function consumeGateTicket(
 
   await ensurePublishedGateSession(sessionId)
 
+  if (ticket.status === TicketStatus.CANCELLED) {
+    return { result: 'INVALID' as const }
+  }
+
   if (ticket.sessionId !== sessionId) {
     return { result: 'WRONG_EVENT' as const }
   }
@@ -208,6 +212,10 @@ export async function consumeGateTicket(
   })
 
   if (!currentTicket) {
+    return { result: 'INVALID' as const }
+  }
+
+  if (currentTicket.status === TicketStatus.CANCELLED) {
     return { result: 'INVALID' as const }
   }
 

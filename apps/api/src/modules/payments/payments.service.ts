@@ -5,6 +5,10 @@ import {
 } from '../../generated/prisma/enums.js'
 import { HttpError } from '../../http/error-response.js'
 import { prisma } from '../../lib/prisma.js'
+import {
+  cancelScheduledInvalidation,
+  publishSeatsChanged,
+} from '../../realtime/session-events.js'
 import { generateManualCode } from '../tickets/ticket-crypto.js'
 import type { ProcessPaymentInput } from './payments.schemas.js'
 
@@ -44,7 +48,7 @@ type PaymentTransactionResult =
       }
       tickets: Array<{ id: string }>
     }
-  | { kind: 'expired' }
+  | { kind: 'expired'; releasedAllocations: number }
   | { kind: 'already-processed' }
   | { kind: 'not-available' }
 
@@ -125,6 +129,7 @@ async function lockReservationSeats(
     SELECT "id", "seatId", "unitPriceCents"
     FROM "ReservationSeat"
     WHERE "reservationId" = ${reservationId}::uuid
+      AND "releasedAt" IS NULL
     ORDER BY "seatId" ASC
     FOR UPDATE
   `)
@@ -219,6 +224,7 @@ async function createApprovedPayment(
 async function createDeclinedPayment(
   transaction: TransactionClient,
   reservation: LockedReservationRow,
+  now: Date,
 ): Promise<Extract<PaymentTransactionResult, { kind: 'processed' }>> {
   const payment = await transaction.payment.create({
     data: {
@@ -240,8 +246,12 @@ async function createDeclinedPayment(
     select: { id: true, status: true },
   })
 
-  await transaction.reservationSeat.deleteMany({
-    where: { reservationId: reservation.id },
+  await transaction.reservationSeat.updateMany({
+    where: {
+      reservationId: reservation.id,
+      releasedAt: null,
+    },
+    data: { releasedAt: now },
   })
 
   return {
@@ -260,7 +270,9 @@ export async function processReservationPayment(
   const initialReservation = await prisma.reservation.findFirst({
     where: { id: reservationId, customerId },
     select: {
+      sessionId: true,
       seats: {
+        where: { releasedAt: null },
         select: { seatId: true },
         orderBy: { seatId: 'asc' },
       },
@@ -271,6 +283,7 @@ export async function processReservationPayment(
     throw reservationNotFound()
   }
 
+  const { sessionId } = initialReservation
   const sortedSeatIds = initialReservation.seats.map(({ seatId }) => seatId)
   let result: PaymentTransactionResult
 
@@ -291,13 +304,21 @@ export async function processReservationPayment(
       const clock = await getDatabaseClock(transaction)
 
       if (reservation.status === ReservationStatus.EXPIRED) {
+        let releasedAllocations = 0
+
         if (reservationSeats.length > 0) {
-          await transaction.reservationSeat.deleteMany({
-            where: { reservationId: reservation.id },
+          const released = await transaction.reservationSeat.updateMany({
+            where: {
+              reservationId: reservation.id,
+              releasedAt: null,
+            },
+            data: { releasedAt: clock.now },
           })
+
+          releasedAllocations = released.count
         }
 
-        return { kind: 'expired' }
+        return { kind: 'expired', releasedAllocations }
       }
 
       if (reservation.status !== ReservationStatus.PENDING) {
@@ -309,11 +330,15 @@ export async function processReservationPayment(
           where: { id: reservation.id },
           data: { status: ReservationStatus.EXPIRED },
         })
-        await transaction.reservationSeat.deleteMany({
-          where: { reservationId: reservation.id },
+        const released = await transaction.reservationSeat.updateMany({
+          where: {
+            reservationId: reservation.id,
+            releasedAt: null,
+          },
+          data: { releasedAt: clock.now },
         })
 
-        return { kind: 'expired' }
+        return { kind: 'expired', releasedAllocations: released.count }
       }
 
       if (reservationSeats.length === 0) {
@@ -338,7 +363,7 @@ export async function processReservationPayment(
         )
       }
 
-      return createDeclinedPayment(transaction, reservation)
+      return createDeclinedPayment(transaction, reservation, clock.now)
     })
   } catch (error) {
     if (isFinalizationConflict(error)) {
@@ -348,7 +373,13 @@ export async function processReservationPayment(
     throw error
   }
 
+  // A partir daqui a transação já commitou: nenhum evento é publicado para
+  // trabalho que sofreu rollback.
   if (result.kind === 'expired') {
+    if (result.releasedAllocations > 0) {
+      publishSeatsChanged(sessionId)
+    }
+
     throw reservationExpired()
   }
 
@@ -359,6 +390,11 @@ export async function processReservationPayment(
   if (result.kind === 'not-available') {
     throw paymentNotAvailable()
   }
+
+  // Aprovação muda a representação pública de HELD para SOLD; recusa devolve
+  // os assentos ao estoque. Ambos alteram o mapa.
+  cancelScheduledInvalidation(result.reservation.id)
+  publishSeatsChanged(sessionId)
 
   return {
     payment: result.payment,

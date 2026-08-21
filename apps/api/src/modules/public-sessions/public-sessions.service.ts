@@ -141,6 +141,14 @@ export async function getPublicSession(id: string) {
   return toPublicSessionDetail(await findPublicSession(id))
 }
 
+/**
+ * Confirma que a sessão é pública antes de abrir um stream para ela, usando
+ * exatamente o mesmo critério do snapshot: publicada e ainda não iniciada.
+ */
+export async function ensurePublicSession(id: string) {
+  await findPublicSession(id)
+}
+
 export async function getPublicSessionSeats(id: string) {
   await findPublicSession(id)
 
@@ -165,6 +173,7 @@ export async function getPublicSessionSeats(id: string) {
     CROSS JOIN database_clock
     LEFT JOIN "ReservationSeat" AS allocation
       ON allocation."seatId" = seat."id"
+      AND allocation."releasedAt" IS NULL
     LEFT JOIN "Reservation" AS reservation
       ON reservation."id" = allocation."reservationId"
     WHERE seat."sessionId" = ${id}::uuid

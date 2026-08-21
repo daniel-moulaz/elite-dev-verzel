@@ -29,6 +29,33 @@ export interface SessionMovie {
 
 export type SessionStatus = 'DRAFT' | 'PUBLISHED'
 
+export type SessionEditabilityReason =
+  | 'DRAFT'
+  | 'PUBLISHED_SAFE'
+  | 'SESSION_STARTED'
+  | 'ACTIVE_HOLD'
+  | 'COMMERCIAL_HISTORY'
+
+/**
+ * Política derivada pelo backend. O frontend apenas apresenta o que vem daqui;
+ * a autoridade sobre editar ou não é sempre do servidor.
+ */
+export interface SessionEditability {
+  allowed: boolean
+  reason: SessionEditabilityReason
+  layoutEditable: boolean
+}
+
+/** Métricas operacionais calculadas pelo backend. Sem dados pessoais. */
+export interface SessionMetrics {
+  capacity: number
+  availableSeats: number
+  heldSeats: number
+  soldSeats: number
+  occupancyPercentage: number
+  simulatedRevenueCents: number
+}
+
 export interface OrganizerSession {
   id: string
   status: SessionStatus
@@ -42,6 +69,8 @@ export interface OrganizerSession {
   rows: number
   seatsPerRow: number
   movie: SessionMovie
+  editability: SessionEditability
+  metrics: SessionMetrics
 }
 
 export interface SessionInput {
@@ -133,13 +162,22 @@ export interface PaymentResult {
   tickets: Array<{ id: string }>
 }
 
-export type TicketStatus = 'VALID' | 'USED'
+export type TicketStatus = 'VALID' | 'USED' | 'CANCELLED'
+
+export interface TicketReservation {
+  id: string
+  status: Extract<ReservationStatus, 'PAID' | 'CANCELLED'>
+  ticketCount: number
+  canCancel: boolean
+}
 
 export interface TicketSummary {
   id: string
   status: TicketStatus
-  manualCode: string
+  manualCode: string | null
   issuedAt: string
+  canCancel: boolean
+  reservation: TicketReservation
   seat: {
     id: string
     label: string
@@ -157,7 +195,7 @@ export interface TicketSummary {
 }
 
 export interface TicketDetail extends TicketSummary {
-  qrToken: string
+  qrToken: string | null
   session: TicketSummary['session'] & {
     address: string
   }
@@ -169,9 +207,9 @@ export interface TicketDetail extends TicketSummary {
 export interface SharedTicket {
   id: string
   status: TicketStatus
-  manualCode: string
+  manualCode: string | null
   issuedAt: string
-  qrToken: string
+  qrToken: string | null
   seat: {
     label: string
   }
@@ -190,6 +228,28 @@ export interface SharedTicket {
 export interface ShareLinkResult {
   url: string
   expiresAt: string
+}
+
+export interface ReservationCancellationResult {
+  reservation: {
+    id: string
+    status: Extract<ReservationStatus, 'CANCELLED'>
+  }
+  tickets: Array<{
+    id: string
+    status: Extract<TicketStatus, 'CANCELLED'>
+  }>
+}
+
+export interface TicketCancellationResult {
+  ticket: {
+    id: string
+    status: Extract<TicketStatus, 'CANCELLED'>
+  }
+  reservation: {
+    id: string
+    status: Extract<ReservationStatus, 'PAID' | 'CANCELLED'>
+  }
 }
 
 export interface GateSession {
@@ -260,6 +320,14 @@ const apiUrl = (import.meta.env.VITE_API_URL || 'http://localhost:3333').replace
   /\/+$/,
   '',
 )
+
+/**
+ * URL do stream SSE de uma sessão. Os eventos são apenas sinais de
+ * invalidação: o estado dos assentos continua vindo de `getSessionSeats`.
+ */
+export function sessionEventsUrl(sessionId: string): string {
+  return `${apiUrl}/sessions/${encodeURIComponent(sessionId)}/events`
+}
 
 let unauthorizedHandler: (() => void) | null = null
 
@@ -454,6 +522,21 @@ export function publishOrganizerSession(
   )
 }
 
+/**
+ * Cria um novo rascunho copiando somente a estrutura da sessão de origem.
+ * Nenhum dado transacional é copiado pelo backend.
+ */
+export function duplicateOrganizerSession(
+  accessToken: string,
+  sessionId: string,
+): Promise<OrganizerSession> {
+  return authenticatedRequest<OrganizerSession>(
+    `/organizer/sessions/${encodeURIComponent(sessionId)}/duplicate`,
+    accessToken,
+    { method: 'POST' },
+  )
+}
+
 export async function getPublicSessions(
   query = '',
   signal?: AbortSignal,
@@ -531,6 +614,17 @@ export function payReservation(
   )
 }
 
+export function cancelReservation(
+  accessToken: string,
+  reservationId: string,
+): Promise<ReservationCancellationResult> {
+  return authenticatedRequest<ReservationCancellationResult>(
+    `/reservations/${encodeURIComponent(reservationId)}/cancel`,
+    accessToken,
+    { method: 'POST' },
+  )
+}
+
 export async function getMyTickets(
   accessToken: string,
   signal?: AbortSignal,
@@ -553,6 +647,17 @@ export function getMyTicket(
     `/me/tickets/${ticketId}`,
     accessToken,
     { signal: signal ?? null },
+  )
+}
+
+export function cancelTicket(
+  accessToken: string,
+  ticketId: string,
+): Promise<TicketCancellationResult> {
+  return authenticatedRequest<TicketCancellationResult>(
+    `/me/tickets/${encodeURIComponent(ticketId)}/cancel`,
+    accessToken,
+    { method: 'POST' },
   )
 }
 

@@ -394,6 +394,67 @@ describe('GET /sessions/:id/seats', () => {
     })
   })
 
+  it('ignores released allocation history when deriving the current seat map', async () => {
+    const session = await createTestSession()
+    const seat = session.seats[0]
+
+    if (!seat) {
+      throw new Error('O layout de teste deveria conter ao menos um assento.')
+    }
+
+    await prisma.reservation.create({
+      data: {
+        customerId,
+        sessionId: session.id,
+        status: ReservationStatus.CANCELLED,
+        expiresAt: futureDate(1),
+        totalCents: session.priceCents,
+        seats: {
+          create: {
+            seatId: seat.id,
+            unitPriceCents: session.priceCents,
+            releasedAt: new Date(),
+          },
+        },
+      },
+    })
+    await prisma.reservation.create({
+      data: {
+        customerId,
+        sessionId: session.id,
+        status: ReservationStatus.PENDING,
+        expiresAt: futureDate(1),
+        totalCents: session.priceCents,
+        seats: {
+          create: {
+            seatId: seat.id,
+            unitPriceCents: session.priceCents,
+          },
+        },
+      },
+    })
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/sessions/${session.id}/seats`,
+    })
+    const body = response.json<{ sessionId: string; seats: PublicSeat[] }>()
+
+    expect(response.statusCode).toBe(200)
+    expect(body.seats).toHaveLength(session.seats.length)
+    expect(body.seats.find(({ id }) => id === seat.id)).toMatchObject({
+      status: 'HELD',
+    })
+    expect(
+      await prisma.reservationSeat.count({ where: { seatId: seat.id } }),
+    ).toBe(2)
+    expect(
+      await prisma.reservationSeat.count({
+        where: { seatId: seat.id, releasedAt: null },
+      }),
+    ).toBe(1)
+  })
+
   it('does not expose a seat map for a DRAFT session', async () => {
     const session = await createTestSession({ status: SessionStatus.DRAFT })
 

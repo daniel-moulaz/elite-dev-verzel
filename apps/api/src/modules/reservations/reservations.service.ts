@@ -5,6 +5,10 @@ import {
 } from '../../generated/prisma/enums.js'
 import { HttpError } from '../../http/error-response.js'
 import { prisma } from '../../lib/prisma.js'
+import {
+  publishSeatsChanged,
+  scheduleSeatsInvalidation,
+} from '../../realtime/session-events.js'
 import type { CreateReservationInput } from './reservations.schemas.js'
 
 export const HOLD_DURATION_MINUTES = 10
@@ -22,6 +26,9 @@ const reservationDetails = {
     },
   },
   seats: {
+    where: {
+      releasedAt: null,
+    },
     select: {
       unitPriceCents: true,
       seat: {
@@ -57,8 +64,12 @@ interface DatabaseClock {
 }
 
 type CreateHoldResult =
-  | { kind: 'created'; reservation: ReservationWithDetails }
-  | { kind: 'conflict' }
+  | {
+      kind: 'created'
+      reservation: ReservationWithDetails
+      releasedAllocations: number
+    }
+  | { kind: 'conflict'; releasedAllocations: number }
 
 type TransactionClient = Prisma.TransactionClient
 
@@ -110,12 +121,42 @@ function uuidList(ids: string[]) {
   return Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))
 }
 
+interface LockedSessionRow {
+  id: string
+  status: SessionStatus
+  startsAt: Date
+  priceCents: number
+}
+
+/**
+ * Primeiro lock da ordem global `Session -> Seat -> Reservation ->
+ * ReservationSeat -> Ticket`. `FOR SHARE` permite que várias reservas
+ * concorrentes prossigam entre si, mas bloqueia a edição estrutural
+ * (`FOR UPDATE`) do organizador — garantindo que preço, horário e layout lidos
+ * aqui não fiquem obsoletos até o commit.
+ */
+async function lockSessionForShare(
+  transaction: TransactionClient,
+  sessionId: string,
+) {
+  const [session] = await transaction.$queryRaw<LockedSessionRow[]>(Prisma.sql`
+    /* create-hold-lock-session */
+    SELECT "id", "status", "startsAt", "priceCents"
+    FROM "Session"
+    WHERE "id" = ${sessionId}::uuid
+    FOR SHARE
+  `)
+
+  return session
+}
+
 async function lockSeats(
   transaction: TransactionClient,
   sessionId: string,
   sortedSeatIds: string[],
 ) {
   return transaction.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    /* create-hold-lock-seats */
     SELECT "id"
     FROM "Seat"
     WHERE "sessionId" = ${sessionId}::uuid
@@ -136,6 +177,7 @@ async function lockReservationsForSeats(
       SELECT rs."reservationId"
       FROM "ReservationSeat" rs
       WHERE rs."seatId" IN (${uuidList(sortedSeatIds)})
+        AND rs."releasedAt" IS NULL
     )
     ORDER BY r."id" ASC
     FOR UPDATE
@@ -216,13 +258,21 @@ async function releaseExpiredAllocations(
     })
   }
 
+  let releasedAllocations = 0
+
   if (releasableIds.length > 0) {
-    await transaction.reservationSeat.deleteMany({
-      where: { reservationId: { in: releasableIds } },
+    const released = await transaction.reservationSeat.updateMany({
+      where: {
+        reservationId: { in: releasableIds },
+        releasedAt: null,
+      },
+      data: { releasedAt: now },
     })
+
+    releasedAllocations = released.count
   }
 
-  return new Set(releasableIds)
+  return { releasableIds: new Set(releasableIds), releasedAllocations }
 }
 
 function isSeatBlocked(
@@ -253,15 +303,7 @@ export async function createReservationHold(
 
   try {
     result = await prisma.$transaction(async (transaction) => {
-      const session = await transaction.session.findUnique({
-        where: { id: input.sessionId },
-        select: {
-          id: true,
-          status: true,
-          startsAt: true,
-          priceCents: true,
-        },
-      })
+      const session = await lockSessionForShare(transaction, input.sessionId)
 
       if (!session || session.status !== SessionStatus.PUBLISHED) {
         throw sessionNotAvailable()
@@ -291,14 +333,15 @@ export async function createReservationHold(
         throw sessionNotAvailable()
       }
 
-      const releasableIds = await releaseExpiredAllocations(
-        transaction,
-        lockedReservations,
-        clock.now,
-      )
+      const { releasableIds, releasedAllocations } =
+        await releaseExpiredAllocations(
+          transaction,
+          lockedReservations,
+          clock.now,
+        )
 
       if (isSeatBlocked(lockedReservations, releasableIds)) {
-        return { kind: 'conflict' }
+        return { kind: 'conflict', releasedAllocations }
       }
 
       const reservation = await transaction.reservation.create({
@@ -317,7 +360,7 @@ export async function createReservationHold(
         include: reservationDetails,
       })
 
-      return { kind: 'created', reservation }
+      return { kind: 'created', reservation, releasedAllocations }
     })
   } catch (error) {
     if (isUniqueSeatConflict(error)) {
@@ -327,9 +370,23 @@ export async function createReservationHold(
     throw error
   }
 
+  // A partir daqui a transação já commitou: nenhum evento é publicado para
+  // trabalho que sofreu rollback.
   if (result.kind === 'conflict') {
+    // Mesmo em conflito a transação pode ter liberado holds vencidos.
+    if (result.releasedAllocations > 0) {
+      publishSeatsChanged(input.sessionId)
+    }
+
     throw seatUnavailable()
   }
+
+  publishSeatsChanged(input.sessionId)
+  scheduleSeatsInvalidation(
+    result.reservation.id,
+    input.sessionId,
+    result.reservation.expiresAt,
+  )
 
   return toReservationResponse(result.reservation)
 }
@@ -338,7 +395,7 @@ export async function getCustomerReservation(
   reservationId: string,
   customerId: string,
 ) {
-  const reservation = await prisma.$transaction(async (transaction) => {
+  const result = await prisma.$transaction(async (transaction) => {
     const initialReservation = await transaction.reservation.findFirst({
       where: { id: reservationId, customerId },
       include: reservationDetails,
@@ -357,7 +414,7 @@ export async function getCustomerReservation(
       initialReservation.status !== ReservationStatus.EXPIRED &&
       initialReservation.status !== ReservationStatus.CANCELLED
     ) {
-      return initialReservation
+      return { reservation: initialReservation, releasedAllocations: 0 }
     }
 
     const sortedSeatIds = initialReservation.seats
@@ -395,21 +452,37 @@ export async function getCustomerReservation(
       })
     }
 
+    let releasedAllocations = 0
+
     if (shouldRelease && currentReservation.seats.length > 0) {
-      await transaction.reservationSeat.deleteMany({
-        where: { reservationId: currentReservation.id },
+      const released = await transaction.reservationSeat.updateMany({
+        where: {
+          reservationId: currentReservation.id,
+          releasedAt: null,
+        },
+        data: { releasedAt: clock.now },
       })
+
+      releasedAllocations = released.count
     }
 
     if (!shouldExpire && !shouldRelease) {
-      return currentReservation
+      return { reservation: currentReservation, releasedAllocations }
     }
 
-    return transaction.reservation.findUniqueOrThrow({
-      where: { id: currentReservation.id },
-      include: reservationDetails,
-    })
+    return {
+      reservation: await transaction.reservation.findUniqueOrThrow({
+        where: { id: currentReservation.id },
+        include: reservationDetails,
+      }),
+      releasedAllocations,
+    }
   })
 
-  return toReservationResponse(reservation)
+  // Publicado somente após o commit da expiração lazy.
+  if (result.releasedAllocations > 0) {
+    publishSeatsChanged(result.reservation.sessionId)
+  }
+
+  return toReservationResponse(result.reservation)
 }

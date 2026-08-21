@@ -10,6 +10,7 @@ import {
   createReservationHold,
   getCustomerReservation,
 } from './reservations.service.js'
+import { cancelCustomerReservation } from './reservation-cancellation.service.js'
 
 function invalidRequest(message = 'A requisição contém dados inválidos.') {
   return new HttpError(400, 'VALIDATION_ERROR', message)
@@ -63,6 +64,29 @@ export const reservationRoutes: FastifyPluginAsync = async (app) => {
       }
 
       return getCustomerReservation(params.data.id, customerId)
+    },
+  )
+
+  app.post(
+    '/:id/cancel',
+    {
+      config: { swaggerTransform: apiDocumentation.reservations.cancel },
+      preHandler: customerOnly,
+    },
+    async (request) => {
+      const params = reservationParamsSchema.safeParse(request.params)
+
+      if (!params.success) {
+        throw invalidRequest('Informe um identificador de reserva válido.')
+      }
+
+      const customerId = request.authUser?.id
+
+      if (!customerId) {
+        throw new HttpError(401, 'UNAUTHORIZED', 'Autenticação necessária.')
+      }
+
+      return cancelCustomerReservation(params.data.id, customerId)
     },
   )
 }

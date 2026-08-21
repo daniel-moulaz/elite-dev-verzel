@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ApiError,
+  cancelReservation,
   getMyTickets,
   type TicketSummary,
 } from '../../api'
@@ -9,6 +10,44 @@ import {
   tmdbPosterUrl,
 } from '../organizer/formatters'
 import { PosterImage } from '../common/PosterImage'
+import { useToast } from '../common/toast'
+
+interface TicketGroup {
+  reservation: TicketSummary['reservation']
+  tickets: TicketSummary[]
+}
+
+const ticketStatusLabels: Record<TicketSummary['status'], string> = {
+  VALID: 'Válido',
+  USED: 'Utilizado',
+  CANCELLED: 'Cancelado',
+}
+
+function groupTicketsByReservation(tickets: TicketSummary[]): TicketGroup[] {
+  const groups = new Map<string, TicketGroup>()
+
+  for (const ticket of tickets) {
+    const group = groups.get(ticket.reservation.id)
+
+    if (group) {
+      group.tickets.push(ticket)
+      group.reservation.canCancel =
+        group.reservation.canCancel && ticket.reservation.canCancel
+      continue
+    }
+
+    groups.set(ticket.reservation.id, {
+      reservation: { ...ticket.reservation },
+      tickets: [ticket],
+    })
+  }
+
+  return [...groups.values()]
+}
+
+function ticketCountLabel(count: number): string {
+  return `${count} ${count === 1 ? 'ingresso' : 'ingressos'}`
+}
 
 interface TicketListProps {
   accessToken: string
@@ -21,10 +60,13 @@ export function TicketList({
   onBack,
   onOpenTicket,
 }: TicketListProps) {
+  const { notify } = useToast()
   const [tickets, setTickets] = useState<TicketSummary[]>([])
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [errorMessage, setErrorMessage] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
+  const [cancellingReservationId, setCancellingReservationId] = useState<string | null>(null)
+  const cancellationLockRef = useRef(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -32,6 +74,7 @@ export function TicketList({
     getMyTickets(accessToken, controller.signal)
       .then((result) => {
         setTickets(result)
+        setErrorMessage('')
         setStatus('ready')
       })
       .catch((error: unknown) => {
@@ -54,6 +97,67 @@ export function TicketList({
     setStatus('loading')
     setErrorMessage('')
     setReloadKey((value) => value + 1)
+  }
+
+  async function cancelPurchase(group: TicketGroup) {
+    if (!group.reservation.canCancel || cancellationLockRef.current) {
+      return
+    }
+
+    const count = group.reservation.ticketCount
+    const confirmed = window.confirm(
+      `Você está cancelando a compra inteira. Todos os ingressos desta compra (${ticketCountLabel(count)}) serão cancelados. `
+      + 'Os assentos voltarão a ficar disponíveis imediatamente. '
+      + 'Como o pagamento é simulado, não haverá estorno financeiro real. Deseja continuar?',
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    cancellationLockRef.current = true
+    setCancellingReservationId(group.reservation.id)
+
+    try {
+      const result = await cancelReservation(accessToken, group.reservation.id)
+      const cancelledTicketIds = new Set(result.tickets.map((ticket) => ticket.id))
+
+      setTickets((current) => current.map((ticket) =>
+        cancelledTicketIds.has(ticket.id)
+          ? {
+              ...ticket,
+              status: 'CANCELLED',
+              manualCode: null,
+              reservation: {
+                ...ticket.reservation,
+                status: 'CANCELLED',
+                canCancel: false,
+              },
+            }
+          : ticket,
+      ))
+      setReloadKey((value) => value + 1)
+      notify(
+        `Compra cancelada. ${ticketCountLabel(count)} e seus assentos foram liberados.`,
+        'success',
+      )
+    } catch (error) {
+      notify(
+        error instanceof ApiError
+          ? error.message
+          : 'Não foi possível cancelar esta compra.',
+        'error',
+      )
+
+      // A falha pode ter ocorrido depois do commit e antes da resposta chegar.
+      // Sempre reconcilie o snapshot local com o PostgreSQL antes de liberar a UX.
+      setStatus('loading')
+      setErrorMessage('')
+      setReloadKey((value) => value + 1)
+    } finally {
+      cancellationLockRef.current = false
+      setCancellingReservationId(null)
+    }
   }
 
   if (status === 'loading') {
@@ -84,6 +188,8 @@ export function TicketList({
       </div>
     )
   }
+
+  const ticketGroups = groupTicketsByReservation(tickets)
 
   return (
     <div className="public-content tickets-page">

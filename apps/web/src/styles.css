@@ -5445,3 +5445,96 @@ html.is-offline .login-shell {
     display: none;
   }
 }
+
+/* Purchase-level ticket cancellation */
+
+.ticket-purchase-list,
+.ticket-purchase-group {
+  display: grid;
+}
+
+.ticket-purchase-list {
+  gap: 1.6rem;
+}
+
+.ticket-purchase-group {
+  gap: 0.8rem;
+}
+
+.ticket-purchase-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.8rem;
+}
+
+.ticket-purchase-heading > div {
+  min-width: 0;
+}
+
+.ticket-purchase-heading .section-kicker {
+  margin-bottom: 0.2rem;
+}
+
+.ticket-purchase-summary {
+  color: var(--muted-strong);
+  font-size: 0.8rem;
+  font-weight: 720;
+}
+
+.ticket-purchase-state {
+  color: #ff8f87;
+  font-size: 0.68rem;
+  font-weight: 820;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ticket-status-badge.ticket-status-cancelled {
+  color: #ff8f87;
+}
+
+.ticket-status-cancelled .ticket-movie .ticket-status-badge {
+  color: #8d2e2e;
+}
+
+.ticket-admission.ticket-admission-cancelled {
+  gap: 0.45rem;
+  background: #e8d8d3;
+}
+
+.ticket-cancelled-title {
+  color: #8d2e2e;
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 42rem) {
+  .ticket-purchase-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ticket-purchase-heading .danger-text-button {
+    width: 100%;
+  }
+}
+
+/* Realtime seat map indicator */
+
+.seat-map-heading p.realtime-indicator {
+  margin-top: 0.45rem;
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 780;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.seat-map-heading p.realtime-indicator[data-state="reconnecting"] {
+  color: var(--warning);
+}
