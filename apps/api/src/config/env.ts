@@ -19,6 +19,13 @@ const envSchema = z
     JWT_SECRET: z.string().min(32),
     TICKET_SIGNING_SECRET: z.string().min(32),
     TMDB_READ_ACCESS_TOKEN: z.string().trim().min(1).optional(),
+    // Ligue somente quando a API estiver mesmo atrás de um proxy confiável.
+    // Confiar em `X-Forwarded-For` sem proxy permitiria forjar a origem e
+    // escapar do limite de abuso do login.
+    TRUST_PROXY: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((value) => value === 'true'),
   })
   .refine(
     ({ JWT_SECRET, TICKET_SIGNING_SECRET }) =>

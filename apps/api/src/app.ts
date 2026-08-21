@@ -2,6 +2,7 @@ import cors from '@fastify/cors'
 import Fastify, { type FastifyServerOptions } from 'fastify'
 import { env } from './config/env.js'
 import { registerErrorHandler } from './http/error-response.js'
+import { registerSecurityHeaders } from './http/security-headers.js'
 import { registerAuth } from './modules/auth/register-auth.js'
 import {
   catalogRoutes,
@@ -38,6 +39,7 @@ export function buildApp(
     )
 
   registerErrorHandler(app)
+  registerSecurityHeaders(app)
   app.register(cors, {
     origin: env.WEB_ORIGIN,
     credentials: false,

@@ -3,6 +3,10 @@ import { env } from './config/env.js'
 import { prisma } from './lib/prisma.js'
 
 const app = buildApp({
+  // Atrás do proxy da plataforma, sem isto `request.ip` seria o endereço do
+  // proxy para todos os clientes e o limite de abuso do login valeria para o
+  // conjunto em vez de por cliente.
+  trustProxy: env.TRUST_PROXY,
   logger: {
     redact: [
       'req.headers.authorization',

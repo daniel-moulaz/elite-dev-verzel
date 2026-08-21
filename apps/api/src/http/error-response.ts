@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify'
 export type ErrorCode =
   | 'VALIDATION_ERROR'
   | 'INVALID_CREDENTIALS'
+  | 'TOO_MANY_LOGIN_ATTEMPTS'
   | 'UNAUTHORIZED'
   | 'FORBIDDEN'
   | 'NOT_FOUND'

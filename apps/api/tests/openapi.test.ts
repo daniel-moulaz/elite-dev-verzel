@@ -369,12 +369,21 @@ describe('OpenAPI documentation', () => {
       findPropertySchema(document, loginBodySchema, 'password'),
     ).toBeDefined()
 
+    // O limite de tentativas faz parte do contrato: um cliente precisa saber
+    // que 429 é possível aqui, e não apenas 401.
+    expect(Object.keys(asObject(login.responses, 'login.responses'))).toEqual(
+      expect.arrayContaining(['200', '400', '401', '429']),
+    )
+
     const authenticatedUser = getOperation(document, '/auth/me', 'get')
     expectBearerSecurity(authenticatedUser)
 
     const roleOperations = [
       ['/organizer/sessions', 'post', 'ORGANIZER'],
+      ['/organizer/sessions/{id}/duplicate', 'post', 'ORGANIZER'],
       ['/reservations', 'post', 'CUSTOMER'],
+      ['/reservations/{id}/cancel', 'post', 'CUSTOMER'],
+      ['/me/tickets/{id}/cancel', 'post', 'CUSTOMER'],
       ['/gate/tickets/consume', 'post', 'GATE'],
     ] as const
 

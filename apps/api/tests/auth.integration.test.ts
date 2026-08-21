@@ -2,6 +2,13 @@ import * as argon2 from 'argon2'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { DEMO_PASSWORD, DEMO_USERS } from '../prisma/seed-data.js'
 import { buildApp } from '../src/app.js'
+import {
+  loginRetryAfterSeconds,
+  loginThrottleKey,
+  loginThrottleLimits,
+  registerFailedLogin,
+  resetLoginThrottle,
+} from '../src/modules/auth/login-throttle.js'
 import { Role } from '../src/generated/prisma/enums.js'
 import { prisma } from '../src/lib/prisma.js'
 
@@ -174,6 +181,123 @@ describe('POST /auth/login', () => {
     expect(response.json<LoginResponse>().user.email).toBe(
       'organizer@demo.local',
     )
+  })
+
+  it('throttles an abusive origin before spending Argon2 on it', async () => {
+    resetLoginThrottle()
+
+    const statuses: number[] = []
+
+    for (let attempt = 0; attempt < loginThrottleLimits.maxFailedAttempts; attempt += 1) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { email: 'customer1@demo.local', password: 'senha-incorreta' },
+      })
+      statuses.push(response.statusCode)
+    }
+
+    expect(new Set(statuses)).toEqual(new Set([401]))
+
+    const blocked = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: 'customer1@demo.local', password: 'senha-incorreta' },
+    })
+
+    expect(blocked.statusCode).toBe(429)
+    expect(blocked.json()).toEqual({
+      error: 'TOO_MANY_LOGIN_ATTEMPTS',
+      message: expect.any(String),
+    })
+    expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0)
+    expect(Number(blocked.headers['retry-after'])).toBeLessThanOrEqual(
+      loginThrottleLimits.cooldownMilliseconds / 1_000,
+    )
+
+    resetLoginThrottle()
+  })
+
+  it('never lets failed attempts lock a specific account out', async () => {
+    resetLoginThrottle()
+
+    // A chave do limite é a origem, não a conta. Falhar contra uma conta não
+    // pode tornar outra — nem ela mesma — inacessível a partir de outro
+    // cliente, porque a conta não participa da chave.
+    const key = loginThrottleKey('203.0.113.10')
+    const start = Date.now()
+
+    for (let attempt = 0; attempt <= loginThrottleLimits.maxFailedAttempts; attempt += 1) {
+      registerFailedLogin(key, start)
+    }
+
+    expect(loginRetryAfterSeconds(key, start + 1_000)).toBeGreaterThan(0)
+
+    // Qualquer outra origem continua livre, para qualquer conta.
+    expect(loginRetryAfterSeconds(loginThrottleKey('198.51.100.7'), start + 1_000)).toBeNull()
+
+    resetLoginThrottle()
+
+    // E, no fluxo real, a conta que sofreu as falhas continua entrando.
+    const login = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: 'customer1@demo.local', password: DEMO_PASSWORD },
+    })
+
+    expect(login.statusCode).toBe(200)
+  })
+
+  it('releases the cooldown on its own', async () => {
+    resetLoginThrottle()
+
+    const key = loginThrottleKey('203.0.113.11')
+    const start = Date.now()
+
+    for (let attempt = 0; attempt < loginThrottleLimits.maxFailedAttempts; attempt += 1) {
+      registerFailedLogin(key, start)
+    }
+
+    expect(loginRetryAfterSeconds(key, start + 1_000)).toBeGreaterThan(0)
+    expect(
+      loginRetryAfterSeconds(
+        key,
+        start + loginThrottleLimits.cooldownMilliseconds + 1,
+      ),
+    ).toBeNull()
+
+    resetLoginThrottle()
+  })
+
+  it('clears the counter after a successful login', async () => {
+    resetLoginThrottle()
+
+    for (let attempt = 0; attempt < loginThrottleLimits.maxFailedAttempts - 1; attempt += 1) {
+      await app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { email: 'gate@demo.local', password: 'senha-incorreta' },
+      })
+    }
+
+    const success = await app.inject({
+      method: 'POST',
+      url: '/auth/login',
+      payload: { email: 'gate@demo.local', password: DEMO_PASSWORD },
+    })
+
+    expect(success.statusCode).toBe(200)
+
+    for (let attempt = 0; attempt < loginThrottleLimits.maxFailedAttempts; attempt += 1) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        payload: { email: 'gate@demo.local', password: 'senha-incorreta' },
+      })
+      expect(response.statusCode).toBe(401)
+    }
+
+    resetLoginThrottle()
   })
 
   it('returns the same generic error for a wrong password and unknown user', async () => {

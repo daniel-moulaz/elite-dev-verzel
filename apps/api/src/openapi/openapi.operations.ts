@@ -81,6 +81,9 @@ export const apiDocumentation = {
         200: documentedResponse('LoginResponse', 'Autenticação concluída.'),
         400: errorResponse('E-mail ou senha em formato inválido.'),
         401: errorResponse('Credenciais inválidas.'),
+        429: errorResponse(
+          'Tentativas de login demais para esta conta e origem. O cabeçalho Retry-After informa quantos segundos faltam.',
+        ),
       },
     }),
     me: documentRoute({
