@@ -2,11 +2,14 @@ import { useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   ApiError,
   createOrganizerSession,
+  duplicateOrganizerSession,
   getOrganizerSession,
   publishOrganizerSession,
+  sessionEventsUrl,
   updateOrganizerSession,
   type CatalogMovie,
   type OrganizerSession,
+  type SessionEditabilityReason,
   type SessionInput,
   type SessionUpdateInput,
 } from '../../api'
@@ -242,6 +245,121 @@ function RoomLayoutPreview({ rows, seatsPerRow }: RoomLayoutPreviewProps) {
   )
 }
 
+/**
+ * O motivo do bloqueio vem sempre do backend; a UI apenas o traduz. Nunca
+ * voltar ao antigo "Estrutura bloqueada após publicação": publicar deixou de
+ * ser, por si só, um motivo de bloqueio.
+ */
+function lockedSessionTitle(reason: SessionEditabilityReason): string {
+  if (reason === 'SESSION_STARTED') {
+    return 'A sessão já começou.'
+  }
+
+  if (reason === 'ACTIVE_HOLD') {
+    return 'Há uma reserva ativa agora.'
+  }
+
+  return 'Esta sessão possui reservas ou ingressos associados.'
+}
+
+function lockedSessionExplanation(reason: SessionEditabilityReason): string {
+  if (reason === 'SESSION_STARTED') {
+    return ' Depois do horário de início, filme, local, preço e assentos não podem mais ser alterados.'
+  }
+
+  if (reason === 'ACTIVE_HOLD') {
+    return ' Aguarde o prazo da reserva terminar ou a compra ser concluída para alterar esta sessão.'
+  }
+
+  return ' Filme, horário, local, preço e layout não podem mais ser alterados.'
+}
+
+interface SessionOperationsPanelProps {
+  session: OrganizerSession
+}
+
+/**
+ * Painel operacional compacto. Todos os números vêm calculados do backend;
+ * a UI não deriva nem estima nada.
+ */
+function SessionOperationsPanel({ session }: SessionOperationsPanelProps) {
+  const { metrics } = session
+
+  return (
+    <section className="session-metrics" aria-labelledby="session-metrics-title">
+      <p className="section-kicker">Operação da sessão</p>
+      <h2 id="session-metrics-title" className="visually-hidden">
+        Métricas operacionais
+      </h2>
+      <dl className="published-facts">
+        <div>
+          <dt>Capacidade</dt>
+          <dd>
+            <strong>{metrics.capacity}</strong>
+            lugares
+          </dd>
+        </div>
+        <div>
+          <dt>Disponíveis</dt>
+          <dd>
+            <strong>{metrics.availableSeats}</strong>
+            livres agora
+          </dd>
+        </div>
+        <div>
+          <dt>Reservas ativas</dt>
+          <dd>
+            <strong>{metrics.heldSeats}</strong>
+            em hold
+          </dd>
+        </div>
+        <div>
+          <dt>Vendidos</dt>
+          <dd>
+            <strong>{metrics.soldSeats}</strong>
+            ingressos vigentes
+          </dd>
+        </div>
+        <div>
+          <dt>Ocupação</dt>
+          <dd>
+            <strong>
+              {metrics.occupancyPercentage.toLocaleString('pt-BR', {
+                maximumFractionDigits: 1,
+              })}
+              %
+            </strong>
+            do total de lugares
+          </dd>
+        </div>
+        <div>
+          <dt>Receita simulada</dt>
+          <dd>
+            <strong>{formatPrice(metrics.simulatedRevenueCents)}</strong>
+            assentos vendidos agora
+          </dd>
+        </div>
+        <div>
+          <dt>Status</dt>
+          <dd>
+            <strong>
+              {session.status === 'PUBLISHED' ? 'Publicada' : 'Rascunho'}
+            </strong>
+            {session.editability.allowed ? 'editável' : 'bloqueada para edição'}
+          </dd>
+        </div>
+        <div>
+          <dt>Data e hora</dt>
+          <dd>
+            <strong>{formatSessionDate(session.startsAt)}</strong>
+            {session.venueName} · {session.roomName}
+          </dd>
+        </div>
+      </dl>
+    </section>
+  )
+}
+
 interface PublishedSessionProps {
   session: OrganizerSession
 }
@@ -306,8 +424,8 @@ function PublishedSession({ session }: PublishedSessionProps) {
       <p className="locked-notice">
         <span aria-hidden="true">●</span>
         <span>
-          <strong>Estrutura bloqueada após publicação.</strong>
-          Filme, horário, local, preço e assentos não podem mais ser alterados.
+          <strong>{lockedSessionTitle(session.editability.reason)}</strong>
+          {lockedSessionExplanation(session.editability.reason)}
         </span>
       </p>
     </article>
@@ -329,6 +447,7 @@ export function SessionEditor({
   const [isLoading, setIsLoading] = useState(Boolean(sessionId))
   const [isSaving, setIsSaving] = useState(false)
   const [isPublishing, setIsPublishing] = useState(false)
+  const [isDuplicating, setIsDuplicating] = useState(false)
   const [isSelectingMovie, setIsSelectingMovie] = useState(false)
   const [isDirty, setIsDirty] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -402,6 +521,47 @@ export function SessionEditor({
 
     return () => controller.abort()
   }, [accessToken, loadRevision, onDirtyChange, sessionId])
+
+  const isPublishedSession = session?.status === 'PUBLISHED'
+
+  // Reaproveita o canal SSE do P0.2 para manter o painel operacional vivo.
+  // Só o snapshot da sessão é atualizado: o formulário em edição nunca é
+  // sobrescrito, e o evento continua sendo apenas um sinal de invalidação.
+  useEffect(() => {
+    if (
+      !sessionId ||
+      !isPublishedSession ||
+      typeof EventSource === 'undefined'
+    ) {
+      return
+    }
+
+    const source = new EventSource(sessionEventsUrl(sessionId))
+    let inFlight = false
+
+    function refreshSnapshot() {
+      if (inFlight) {
+        return
+      }
+
+      inFlight = true
+      getOrganizerSession(accessToken, sessionId!)
+        .then((loadedSession) => setSession(loadedSession))
+        .catch(() => undefined)
+        .finally(() => {
+          inFlight = false
+        })
+    }
+
+    source.addEventListener('seats-changed', refreshSnapshot)
+    source.addEventListener('session-changed', refreshSnapshot)
+
+    return () => {
+      source.removeEventListener('seats-changed', refreshSnapshot)
+      source.removeEventListener('session-changed', refreshSnapshot)
+      source.close()
+    }
+  }, [accessToken, isPublishedSession, sessionId])
 
   function updateField(field: keyof SessionFormState, value: string) {
     setForm((current) => ({ ...current, [field]: value }))
@@ -488,6 +648,35 @@ export function SessionEditor({
     }
   }
 
+  async function duplicateThisSession() {
+    if (!session || isDuplicating) {
+      return
+    }
+
+    setIsDuplicating(true)
+    setActionError(null)
+    setNotice(null)
+
+    try {
+      const copy = await duplicateOrganizerSession(accessToken, session.id)
+      notify(
+        'Cópia criada como rascunho. Revise data e horário antes de publicar.',
+        'success',
+      )
+      // Abre o editor do novo rascunho para a revisão imediata.
+      updateDirtyState(false)
+      onCreated?.(copy.id)
+    } catch (duplicateError) {
+      setActionError(
+        duplicateError instanceof ApiError
+          ? duplicateError.message
+          : 'Não foi possível duplicar esta sessão.',
+      )
+    } finally {
+      setIsDuplicating(false)
+    }
+  }
+
   async function handlePublish() {
     if (!session) {
       return
@@ -504,7 +693,10 @@ export function SessionEditor({
       )
       setSession(publishedSession)
       setIsPublishDialogOpen(false)
-      notify('Sessão publicada. A estrutura agora está bloqueada.', 'success')
+      notify(
+        'Sessão publicada e disponível na programação. Ela continua editável até a primeira reserva.',
+        'success',
+      )
     } catch (publishError) {
       setActionError(
         publishError instanceof ApiError
@@ -555,6 +747,10 @@ export function SessionEditor({
   }
 
   const isPublished = session?.status === 'PUBLISHED'
+  // Publicar não bloqueia mais por si só: quem decide é a política de
+  // editabilidade derivada pelo backend.
+  const isStructurallyLocked = Boolean(session && !session.editability.allowed)
+  const isLayoutLocked = Boolean(session && !session.editability.layoutEditable)
   const isBusy = isSaving || isPublishing || isSelectingMovie
   const rows = Number(form.rows)
   const seatsPerRow = Number(form.seatsPerRow)
@@ -597,7 +793,9 @@ export function SessionEditor({
           </h1>
           <p>
             {isPublished
-              ? 'Consulte os dados publicados em modo de leitura.'
+              ? isStructurallyLocked
+                ? 'Consulte os dados publicados em modo de leitura.'
+                : 'Sessão publicada, ainda sem reservas: os dados continuam editáveis.'
               : 'Escolha o filme e configure apenas o necessário para a exibição.'}
           </p>
         </div>
@@ -615,6 +813,16 @@ export function SessionEditor({
                 {isPublished ? 'Publicada' : 'Rascunho'}
               </span>
             ) : null}
+            {session ? (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void duplicateThisSession()}
+                disabled={isBusy || isDuplicating}
+              >
+                {isDuplicating ? 'Duplicando…' : 'Duplicar sessão'}
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -631,10 +839,27 @@ export function SessionEditor({
         </p>
       ) : null}
 
-      {isPublished && session ? (
+      {session && isPublished ? (
+        <SessionOperationsPanel session={session} />
+      ) : null}
+
+      {isStructurallyLocked && session ? (
         <PublishedSession session={session} />
       ) : (
         <>
+          {isPublished ? (
+            <p className="editable-published-notice">
+              <span aria-hidden="true">●</span>
+              <span>
+                <strong>Sessão publicada e ainda editável.</strong>
+                {isLayoutLocked
+                  ? ' Nenhuma reserva ou ingresso está ativo nesta sessão, então filme, horário, local e preço ainda podem ser alterados. Só o mapa de assentos ficou travado, porque lugares desta sessão já foram reservados antes.'
+                  : ' Nenhuma reserva ou ingresso depende desta estrutura, então filme, horário, local, preço e layout ainda podem ser alterados.'}
+                {' '}
+                Assim que alguém reservar, a edição é bloqueada.
+              </span>
+            </p>
+          ) : null}
           <MoviePicker
             accessToken={accessToken}
             disabled={isBusy}
@@ -814,7 +1039,7 @@ export function SessionEditor({
                       id="rows"
                       type="number"
                       value={form.rows}
-                      disabled={isBusy}
+                      disabled={isBusy || isLayoutLocked}
                       min="1"
                       max="10"
                       onChange={(event) =>
@@ -839,7 +1064,7 @@ export function SessionEditor({
                       id="seats-per-row"
                       type="number"
                       value={form.seatsPerRow}
-                      disabled={isBusy}
+                      disabled={isBusy || isLayoutLocked}
                       min="1"
                       max="20"
                       onChange={(event) =>
@@ -948,8 +1173,9 @@ export function SessionEditor({
             </dl>
 
             <p className="publish-dialog-warning">
-              <strong>Após publicar,</strong> filme, horário, preço, local e
-              assentos ficam bloqueados.
+              <strong>Após publicar,</strong> a sessão entra na programação
+              pública. Filme, horário, preço, local e assentos continuam
+              editáveis até a primeira reserva ou ingresso.
             </p>
 
             {actionError ? (

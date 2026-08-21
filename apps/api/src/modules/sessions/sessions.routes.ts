@@ -10,6 +10,7 @@ import {
 } from './sessions.schemas.js'
 import {
   createOrganizerSession,
+  duplicateOrganizerSession,
   getOrganizerSession,
   listOrganizerSessions,
   publishOrganizerSession,
@@ -127,6 +128,31 @@ export const organizerSessionRoutes: FastifyPluginAsync<
         body.data,
         options.movieCatalog,
       )
+    },
+  )
+
+  app.post(
+    '/sessions/:id/duplicate',
+    {
+      config: { swaggerTransform: apiDocumentation.organizer.duplicateSession },
+      preHandler: organizerOnly,
+    },
+    async (request, reply) => {
+      const params = sessionParamsSchema.safeParse(request.params)
+
+      if (!params.success) {
+        throw invalidRequest('Informe um identificador de sessão válido.')
+      }
+
+      const organizerId = request.authUser?.id
+
+      if (!organizerId) {
+        throw new HttpError(401, 'UNAUTHORIZED', 'Autenticação necessária.')
+      }
+
+      const copy = await duplicateOrganizerSession(params.data.id, organizerId)
+
+      return reply.code(201).send(copy)
     },
   )
 

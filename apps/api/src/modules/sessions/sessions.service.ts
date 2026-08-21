@@ -1,8 +1,24 @@
-import type { Prisma } from '../../generated/prisma/client.js'
+import { Prisma } from '../../generated/prisma/client.js'
 import { SessionStatus } from '../../generated/prisma/enums.js'
 import { HttpError } from '../../http/error-response.js'
 import { prisma } from '../../lib/prisma.js'
+import {
+  publishSeatsChanged,
+  publishSessionChanged,
+} from '../../realtime/session-events.js'
 import type { MovieCatalog } from '../catalog/catalog.types.js'
+import {
+  getSessionEditability,
+  getSessionEditabilityMap,
+  sessionLayoutNotEditable,
+  sessionNotEditable,
+  type SessionEditability,
+} from './session-editability.js'
+import {
+  getSessionMetrics,
+  getSessionMetricsMap,
+  type SessionMetrics,
+} from './session-metrics.js'
 import type {
   CreateSessionInput,
   UpdateSessionInput,
@@ -45,6 +61,42 @@ export interface OrganizerSessionResponse {
   capacity: number
   rows: number
   seatsPerRow: number
+  editability: SessionEditability
+  metrics: SessionMetrics
+}
+
+interface LockedSessionRow {
+  id: string
+  status: SessionStatus
+  startsAt: Date
+  publishedAt: Date | null
+}
+
+function sessionNotFound() {
+  return new HttpError(404, 'SESSION_NOT_FOUND', 'Sessão não encontrada.')
+}
+
+/**
+ * Primeiro lock da ordem global `Session -> Seat -> Reservation ->
+ * ReservationSeat -> Ticket`. Nenhum outro fluxo trava a linha de `Session`,
+ * então adquiri-la primeiro não inverte a ordem de pagamento, portaria ou
+ * cancelamento.
+ */
+async function lockSessionForUpdate(
+  transaction: Prisma.TransactionClient,
+  sessionId: string,
+  organizerId: string,
+) {
+  const [session] = await transaction.$queryRaw<LockedSessionRow[]>(Prisma.sql`
+    /* update-session-lock-session */
+    SELECT "id", "status", "startsAt", "publishedAt"
+    FROM "Session"
+    WHERE "id" = ${sessionId}::uuid
+      AND "organizerId" = ${organizerId}::uuid
+    FOR UPDATE
+  `)
+
+  return session
 }
 
 function buildSeats(rows: number, seatsPerRow: number) {
@@ -104,6 +156,8 @@ function movieSnapshot(
 
 function toOrganizerSession(
   session: SessionWithSeats,
+  editability: SessionEditability,
+  metrics: SessionMetrics,
 ): OrganizerSessionResponse {
   const rowSizes = new Map<string, number>()
 
@@ -137,6 +191,8 @@ function toOrganizerSession(
     rows: rowSizes.size,
     seatsPerRow:
       rowSizes.size === 0 ? 0 : Math.max(...Array.from(rowSizes.values())),
+    editability,
+    metrics,
   }
 }
 
@@ -196,7 +252,19 @@ export async function createOrganizerSession(
     }),
   )
 
-  return toOrganizerSession(session)
+  // Um rascunho recém-criado nunca tem reserva, ingresso ou alocação.
+  return toOrganizerSession(
+    session,
+    { allowed: true, reason: 'DRAFT', layoutEditable: true },
+    {
+      capacity: session.seats.length,
+      availableSeats: session.seats.length,
+      heldSeats: 0,
+      soldSeats: 0,
+      occupancyPercentage: 0,
+      simulatedRevenueCents: 0,
+    },
+  )
 }
 
 export async function listOrganizerSessions(organizerId: string) {
@@ -206,11 +274,40 @@ export async function listOrganizerSessions(organizerId: string) {
     orderBy: [{ startsAt: 'asc' }, { createdAt: 'desc' }],
   })
 
-  return sessions.map(toOrganizerSession)
+  // Duas consultas agregadas para a lista inteira, nunca uma por sessão.
+  const [editabilityById, metricsById] = await Promise.all([
+    getSessionEditabilityMap(sessions),
+    getSessionMetricsMap(sessions.map(({ id }) => id)),
+  ])
+
+  return sessions.map((session) =>
+    toOrganizerSession(
+      session,
+      editabilityById.get(session.id) ?? {
+        allowed: false,
+        reason: 'COMMERCIAL_HISTORY',
+        layoutEditable: false,
+      },
+      metricsById.get(session.id) ?? {
+        capacity: session.seats.length,
+        availableSeats: 0,
+        heldSeats: 0,
+        soldSeats: 0,
+        occupancyPercentage: 0,
+        simulatedRevenueCents: 0,
+      },
+    ),
+  )
 }
 
 export async function getOrganizerSession(id: string, organizerId: string) {
-  return toOrganizerSession(await findOwnedSession(id, organizerId))
+  const session = await findOwnedSession(id, organizerId)
+  const [editability, metrics] = await Promise.all([
+    getSessionEditability(session.id, session.status),
+    getSessionMetrics(session.id),
+  ])
+
+  return toOrganizerSession(session, editability, metrics)
 }
 
 export async function updateOrganizerSession(
@@ -220,25 +317,26 @@ export async function updateOrganizerSession(
   movieCatalog: MovieCatalog,
 ) {
   const existingSession = await findOwnedSession(id, organizerId)
+  const startsAt = input.startsAt ?? existingSession.startsAt
 
-  if (existingSession.status !== SessionStatus.DRAFT) {
-    throw new HttpError(
-      409,
-      'SESSION_NOT_EDITABLE',
-      'Sessões publicadas não podem ser editadas.',
-    )
+  // Só o horário explicitamente enviado é validado antes da transação. Uma
+  // sessão que já começou deve receber o motivo real da recusa
+  // (SESSION_STARTED), decidido adiante com o relógio do banco, e não um
+  // erro genérico de validação da data que ela já tinha.
+  if (input.startsAt !== undefined) {
+    ensureFuture(input.startsAt)
   }
 
-  const startsAt = input.startsAt ?? existingSession.startsAt
-  ensureFuture(startsAt)
-
+  // A chamada externa fica fora da transação para não segurar locks enquanto
+  // a TMDb responde.
   const movie =
     input.tmdbMovieId !== undefined &&
     input.tmdbMovieId !== existingSession.tmdbMovieId
       ? await movieCatalog.getMovieDetails(input.tmdbMovieId)
       : null
 
-  ensureFuture(startsAt)
+  const rebuildsLayout =
+    input.rows !== undefined && input.seatsPerRow !== undefined
 
   const updateData: Prisma.SessionUpdateManyMutationInput = {
     updatedAt: new Date(),
@@ -254,41 +352,150 @@ export async function updateOrganizerSession(
     ...(movie ? movieSnapshot(movie) : {}),
   }
 
-  const session = await prisma.$transaction(async (transaction) => {
+  const result = await prisma.$transaction(async (transaction) => {
+    // Primeiro lock da ordem global. `FOR UPDATE` na Session exclui qualquer
+    // reserva concorrente, que adquire `FOR SHARE` antes de ler preço e
+    // layout — nenhuma reserva pode nascer sobre estrutura obsoleta.
+    const lockedSession = await lockSessionForUpdate(
+      transaction,
+      id,
+      organizerId,
+    )
+
+    if (!lockedSession) {
+      throw sessionNotFound()
+    }
+
+    // Revalidado com os locks já adquiridos: a decisão tomada antes da
+    // transação nunca é a autoridade final.
+    const editability = await getSessionEditability(
+      id,
+      lockedSession.status,
+      transaction,
+    )
+
+    if (!editability.allowed) {
+      throw sessionNotEditable(editability)
+    }
+
+    if (rebuildsLayout && !editability.layoutEditable) {
+      throw sessionLayoutNotEditable()
+    }
+
+    // Só depois de provar que a edição é permitida faz sentido cobrar que o
+    // resultado continue no futuro.
+    ensureFuture(startsAt)
+
     const updateResult = await transaction.session.updateMany({
-      where: {
-        id,
-        organizerId,
-        status: SessionStatus.DRAFT,
-      },
+      where: { id, organizerId, status: lockedSession.status },
       data: updateData,
     })
 
     if (updateResult.count !== 1) {
-      throw new HttpError(
-        409,
-        'SESSION_NOT_EDITABLE',
-        'Sessões publicadas não podem ser editadas.',
-      )
+      throw sessionNotEditable(editability)
     }
 
-    if (input.rows !== undefined && input.seatsPerRow !== undefined) {
+    if (rebuildsLayout) {
+      // Seguro apenas porque `layoutEditable` provou que nenhuma
+      // `ReservationSeat` referencia estes assentos: sem órfãos e sem
+      // violar a FK RESTRICT.
       await transaction.seat.deleteMany({ where: { sessionId: id } })
       await transaction.seat.createMany({
-        data: buildSeats(input.rows, input.seatsPerRow).map((seat) => ({
+        data: buildSeats(input.rows!, input.seatsPerRow!).map((seat) => ({
           ...seat,
           sessionId: id,
         })),
       })
     }
 
-    return transaction.session.findUniqueOrThrow({
-      where: { id },
-      include: sessionWithSeats,
-    })
+    return {
+      session: await transaction.session.findUniqueOrThrow({
+        where: { id },
+        include: sessionWithSeats,
+      }),
+      editability,
+    }
   })
 
-  return toOrganizerSession(session)
+  // Publicado somente após o commit; um rollback não emite nada.
+  if (result.session.status === SessionStatus.PUBLISHED) {
+    publishSessionChanged(id)
+
+    if (rebuildsLayout) {
+      publishSeatsChanged(id)
+    }
+  }
+
+  return toOrganizerSession(
+    result.session,
+    result.editability,
+    await getSessionMetrics(id),
+  )
+}
+
+/**
+ * Cria um novo DRAFT a partir da estrutura de uma sessão existente.
+ *
+ * Copia apenas o que descreve a sessão — snapshot do filme, local, sala,
+ * endereço, preço e o formato do layout. Nada transacional é copiado: reservas,
+ * alocações, pagamentos, ingressos e links compartilhados pertencem à sessão
+ * de origem. A cópia nasce `DRAFT`, com `publishedAt` nulo e assentos novos.
+ * A TMDb não é consultada de novo: o snapshot local já é a fonte.
+ */
+export async function duplicateOrganizerSession(
+  id: string,
+  organizerId: string,
+) {
+  const source = await findOwnedSession(id, organizerId)
+  const rowSizes = new Map<string, number>()
+
+  for (const seat of source.seats) {
+    rowSizes.set(seat.rowLabel, (rowSizes.get(seat.rowLabel) ?? 0) + 1)
+  }
+
+  const rows = rowSizes.size
+  const seatsPerRow =
+    rowSizes.size === 0 ? 0 : Math.max(...Array.from(rowSizes.values()))
+
+  const copy = await prisma.$transaction((transaction) =>
+    transaction.session.create({
+      data: {
+        organizerId,
+        // Nunca copiado da origem: a cópia sempre nasce como rascunho.
+        status: SessionStatus.DRAFT,
+        publishedAt: null,
+        startsAt: source.startsAt,
+        venueName: source.venueName,
+        roomName: source.roomName,
+        address: source.address,
+        priceCents: source.priceCents,
+        tmdbMovieId: source.tmdbMovieId,
+        movieTitle: source.movieTitle,
+        movieOverview: source.movieOverview,
+        moviePosterPath: source.moviePosterPath,
+        movieBackdropPath: source.movieBackdropPath,
+        movieReleaseDate: source.movieReleaseDate,
+        movieRuntimeMinutes: source.movieRuntimeMinutes,
+        ...(rows > 0 && seatsPerRow > 0
+          ? { seats: { createMany: { data: buildSeats(rows, seatsPerRow) } } }
+          : {}),
+      },
+      include: sessionWithSeats,
+    }),
+  )
+
+  return toOrganizerSession(
+    copy,
+    { allowed: true, reason: 'DRAFT', layoutEditable: true },
+    {
+      capacity: copy.seats.length,
+      availableSeats: copy.seats.length,
+      heldSeats: 0,
+      soldSeats: 0,
+      occupancyPercentage: 0,
+      simulatedRevenueCents: 0,
+    },
+  )
 }
 
 export async function publishOrganizerSession(
@@ -350,5 +557,10 @@ export async function publishOrganizerSession(
     })
   })
 
-  return toOrganizerSession(session)
+  const [editability, metrics] = await Promise.all([
+    getSessionEditability(session.id, session.status),
+    getSessionMetrics(session.id),
+  ])
+
+  return toOrganizerSession(session, editability, metrics)
 }

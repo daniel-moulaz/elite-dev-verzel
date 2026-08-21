@@ -3609,7 +3609,8 @@ html.is-offline .login-shell {
   padding-block: 1rem;
 }
 
-.locked-notice {
+.locked-notice,
+.editable-published-notice {
   display: flex;
   align-items: flex-start;
   gap: 0.7rem;
@@ -3621,16 +3622,19 @@ html.is-offline .login-shell {
   line-height: 1.45;
 }
 
-.locked-notice > span:first-child {
+.locked-notice > span:first-child,
+.editable-published-notice > span:first-child {
   color: var(--success);
 }
 
-.locked-notice > span:last-child {
+.locked-notice > span:last-child,
+.editable-published-notice > span:last-child {
   display: grid;
   gap: 0.15rem;
 }
 
-.locked-notice strong {
+.locked-notice strong,
+.editable-published-notice strong {
   color: #d9ede0;
 }
 
@@ -5537,4 +5541,26 @@ html.is-offline .login-shell {
 
 .seat-map-heading p.realtime-indicator[data-state="reconnecting"] {
   color: var(--warning);
+}
+
+/* Organizer operational panel */
+
+.session-metrics {
+  margin-top: 1rem;
+  padding: clamp(1rem, 3vw, 1.6rem);
+  background: var(--surface);
+}
+
+.session-metrics .published-facts {
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+  border-top: 0;
+  padding-top: 0.6rem;
+}
+
+.session-metrics dd strong {
+  display: block;
+  color: var(--muted-strong);
+  font-size: 1.05rem;
+  font-weight: 820;
+  line-height: 1.25;
 }

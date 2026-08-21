@@ -628,7 +628,7 @@ describe('POST /organizer/sessions/:id/publish', () => {
     expect(stored.publishedAt).not.toBeNull()
   })
 
-  it('keeps PUBLISHED sessions structurally immutable', async () => {
+  it('keeps a published session published and refuses a second publication', async () => {
     const created = await createSession()
     const publishResponse = await app.inject({
       method: 'POST',
@@ -637,31 +637,25 @@ describe('POST /organizer/sessions/:id/publish', () => {
     })
     expect(publishResponse.statusCode).toBe(200)
 
-    const editResponse = await app.inject({
-      method: 'PATCH',
-      url: `/organizer/sessions/${created.id}`,
-      headers: authorization(tokenFor(Role.ORGANIZER)),
-      payload: { priceCents: 1 },
-    })
     const republishResponse = await app.inject({
       method: 'POST',
       url: `/organizer/sessions/${created.id}/publish`,
       headers: authorization(tokenFor(Role.ORGANIZER)),
     })
 
-    expect(editResponse.statusCode).toBe(409)
-    expect(editResponse.json()).toMatchObject({
-      error: 'SESSION_NOT_EDITABLE',
-    })
     expect(republishResponse.statusCode).toBe(409)
     expect(republishResponse.json()).toMatchObject({
       error: 'SESSION_ALREADY_PUBLISHED',
     })
 
+    // A imutabilidade absoluta de PUBLISHED foi substituída pela política de
+    // edição segura (ADR-022); a cobertura completa vive em
+    // session-editability.integration.test.ts.
     const stored = await prisma.session.findUniqueOrThrow({
       where: { id: created.id },
     })
-    expect(stored.priceCents).toBe(3_000)
+    expect(stored.status).toBe(SessionStatus.PUBLISHED)
+    expect(stored.publishedAt).not.toBeNull()
   })
 
   it('rejects a DRAFT whose start time is no longer in the future', async () => {
